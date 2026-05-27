@@ -14,43 +14,62 @@ export function FavoriteButton({
   isFavorite = false,
   onToggle,
 }: FavoriteButtonProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const [favorite, setFavorite] = useState(isFavorite);
+  const [error, setError] = useState<string | null>(null);
 
   const handleToggle = async () => {
-    setIsLoading(true);
+    // Optimistic flip — show the new state immediately.
+    const previous = favorite;
+    const next = !previous;
+    setFavorite(next);
+    setError(null);
+    onToggle?.(next);
+
     try {
       const res = await fetch('/api/transactions/favorites', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionId }),
+        body: JSON.stringify({ transactionId, isFavorite: next }),
       });
-
-      if (res.ok) {
-        const data = await res.json();
+      if (!res.ok) throw new Error('Request failed');
+      const data = await res.json();
+      // Reconcile with server truth in case it differs.
+      if (typeof data.isFavorite === 'boolean' && data.isFavorite !== next) {
         setFavorite(data.isFavorite);
         onToggle?.(data.isFavorite);
       }
-    } catch (error) {
-      console.error('Failed to toggle favorite:', error);
-    } finally {
-      setIsLoading(false);
+    } catch (err) {
+      // Rollback on failure.
+      setFavorite(previous);
+      onToggle?.(previous);
+      setError(err instanceof Error ? err.message : 'Failed to update favorite');
     }
   };
 
   return (
-    <button
-      onClick={handleToggle}
-      disabled={isLoading}
-      className={cn(
-        'p-1 transition-colors',
-        favorite
-          ? 'text-yellow-500 hover:text-yellow-600'
-          : 'text-[#666666] hover:text-[#999999]'
+    <span className="inline-flex flex-col items-start">
+      <button
+        type="button"
+        onClick={handleToggle}
+        className={cn(
+          'p-1 transition-colors',
+          favorite
+            ? 'text-yellow-500 hover:text-yellow-600'
+            : 'text-[#666666] hover:text-[#999999]'
+        )}
+        title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+        aria-pressed={favorite}
+        aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        <span className="text-lg" aria-hidden="true">
+          {favorite ? '★' : '☆'}
+        </span>
+      </button>
+      {error && (
+        <span role="alert" className="text-[10px] text-red-400 mt-0.5">
+          {error}
+        </span>
       )}
-      title={favorite ? 'Remove from favorites' : 'Add to favorites'}
-    >
-      <span className="text-lg">{favorite ? '★' : '☆'}</span>
-    </button>
+    </span>
   );
 }

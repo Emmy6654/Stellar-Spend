@@ -44,34 +44,17 @@ function getCurrencySymbol(currency: string): string {
   return symbols[currency.toUpperCase()] || currency.toUpperCase();
 }
 
-function StatusBadge({ status }: { status: Transaction["status"] }) {
-  const styles = {
-    pending: "bg-yellow-500/20 text-yellow-500 border-yellow-500/30",
-    completed: "bg-green-500/20 text-green-500 border-green-500/30",
-    failed: "bg-red-500/20 text-red-500 border-red-500/30",
-  };
-  return (
-    <span
-      className={cn(
-        "inline-block px-2.5 py-0.5 text-[10px] tracking-widest uppercase font-semibold border",
-        styles[status],
-      )}
-    >
-      {status}
-    </span>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Filter state
 // ---------------------------------------------------------------------------
 
-type SortField = "timestamp" | "amount";
+type SortField = "timestamp" | "amount" | "status";
 type SortDir = "asc" | "desc";
 
 interface Filters {
   search: string;
   status: Transaction["status"] | "all";
+  currency: string; // "" = all
   dateFrom: string;
   dateTo: string;
   amountMin: string;
@@ -83,6 +66,7 @@ interface Filters {
 const DEFAULT_FILTERS: Filters = {
   search: "",
   status: "all",
+  currency: "",
   dateFrom: "",
   dateTo: "",
   amountMin: "",
@@ -90,6 +74,33 @@ const DEFAULT_FILTERS: Filters = {
   sortField: "timestamp",
   sortDir: "desc",
 };
+
+const FILTERS_STORAGE_KEY = "stellar_spend_history_filters";
+
+function loadStoredFilters(): Filters {
+  if (typeof window === "undefined") return DEFAULT_FILTERS;
+  try {
+    const raw = localStorage.getItem(FILTERS_STORAGE_KEY);
+    if (!raw) return DEFAULT_FILTERS;
+    const parsed = JSON.parse(raw);
+    // Merge with defaults so older stored shapes don't drop new fields.
+    return { ...DEFAULT_FILTERS, ...parsed };
+  } catch {
+    return DEFAULT_FILTERS;
+  }
+}
+
+function activeFilterCount(filters: Filters): number {
+  let count = 0;
+  if (filters.search.trim()) count++;
+  if (filters.status !== "all") count++;
+  if (filters.currency) count++;
+  if (filters.dateFrom) count++;
+  if (filters.dateTo) count++;
+  if (filters.amountMin) count++;
+  if (filters.amountMax) count++;
+  return count;
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -100,10 +111,28 @@ export default function HistoryPage() {
     useStellarWallet();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [filtersLoaded, setFiltersLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteInput, setNoteInput] = useState("");
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  // Hydrate filters from localStorage on mount (client-only).
+  useEffect(() => {
+    setFilters(loadStoredFilters());
+    setFiltersLoaded(true);
+  }, []);
+
+  // Persist filters whenever they change (after initial hydration).
+  useEffect(() => {
+    if (!filtersLoaded) return;
+    try {
+      localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters));
+    } catch {
+      // localStorage may be unavailable (e.g. quota, private mode); fail silently.
+    }
+  }, [filters, filtersLoaded]);
 
   useEffect(() => {
     if (!wallet?.publicKey) {
@@ -147,12 +176,39 @@ export default function HistoryPage() {
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
-  const saveNote = (id: string) => {
-    TransactionStorage.updateNote(id, noteInput);
-    setTransactions((prev) =>
-      prev.map((tx) => (tx.id === id ? { ...tx, note: noteInput.slice(0, 500) } : tx)),
-    );
+  // Optimistic note save: update UI + local storage immediately, persist to
+  // the server, and rollback both layers if the request fails.
+  const saveNote = async (id: string) => {
+    const trimmed = noteInput.slice(0, 500);
+    const previous = transactions.find((tx) => tx.id === id)?.note;
+
     setEditingNoteId(null);
+    setNoteError(null);
+
+    // Optimistic UI + local persistence.
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === id ? { ...tx, note: trimmed } : tx)),
+    );
+    const rollbackLocal = TransactionStorage.applyOptimistic(id, { note: trimmed });
+
+    try {
+      const res = await fetch(`/api/transactions/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: trimmed }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `Save failed (${res.status})`);
+      }
+    } catch (err) {
+      // Rollback UI + local storage.
+      setTransactions((prev) =>
+        prev.map((tx) => (tx.id === id ? { ...tx, note: previous } : tx)),
+      );
+      rollbackLocal();
+      setNoteError(err instanceof Error ? err.message : "Failed to save note");
+    }
   };
 
   const toggleSort = (field: SortField) =>
@@ -162,6 +218,13 @@ export default function HistoryPage() {
       sortDir:
         prev.sortField === field && prev.sortDir === "desc" ? "asc" : "desc",
     }));
+
+  // Distinct currencies present in the user's transactions, for the filter dropdown.
+  const availableCurrencies = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((tx) => tx.currency && set.add(tx.currency));
+    return Array.from(set).sort();
+  }, [transactions]);
 
   const filtered = useMemo(() => {
     let result = [...transactions];
@@ -182,13 +245,17 @@ export default function HistoryPage() {
       result = result.filter((tx) => tx.status === filters.status);
     }
 
+    // Currency filter
+    if (filters.currency) {
+      result = result.filter((tx) => tx.currency === filters.currency);
+    }
+
     // Date range
     if (filters.dateFrom) {
       const from = new Date(filters.dateFrom).getTime();
       result = result.filter((tx) => tx.timestamp >= from);
     }
     if (filters.dateTo) {
-      // include the full end day
       const to = new Date(filters.dateTo).getTime() + 86_400_000 - 1;
       result = result.filter((tx) => tx.timestamp <= to);
     }
@@ -209,20 +276,18 @@ export default function HistoryPage() {
     result.sort((a, b) => {
       let diff = 0;
       if (filters.sortField === "timestamp") diff = a.timestamp - b.timestamp;
-      else diff = parseFloat(a.amount) - parseFloat(b.amount);
+      else if (filters.sortField === "amount")
+        diff = parseFloat(a.amount) - parseFloat(b.amount);
+      else if (filters.sortField === "status")
+        diff = a.status.localeCompare(b.status);
       return filters.sortDir === "asc" ? diff : -diff;
     });
 
     return result;
   }, [transactions, filters]);
 
-  const hasActiveFilters =
-    filters.search ||
-    filters.status !== "all" ||
-    filters.dateFrom ||
-    filters.dateTo ||
-    filters.amountMin ||
-    filters.amountMax;
+  const filterCount = activeFilterCount(filters);
+  const hasActiveFilters = filterCount > 0;
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (filters.sortField !== field)
@@ -303,6 +368,19 @@ export default function HistoryPage() {
 
             {/* ── Filters ── */}
             <div className="border border-[#333333] bg-[#111111] p-4 mt-4">
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-[10px] tracking-widest uppercase text-[#aaaaaa]">
+                  Filters
+                </h2>
+                {hasActiveFilters && (
+                  <span
+                    aria-label={`${filterCount} active filter${filterCount === 1 ? "" : "s"}`}
+                    className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[10px] font-bold rounded-full bg-[#c9a962] text-[#0a0a0a]"
+                  >
+                    {filterCount}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-3 items-end">
                 {/* Search */}
                 <div className="flex flex-col gap-1">
@@ -344,6 +422,34 @@ export default function HistoryPage() {
                     <option value="pending">Pending</option>
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>
+                    <option value="reversed">Reversed</option>
+                    <option value="partially_reversed">Partially reversed</option>
+                  </select>
+                </div>
+
+                {/* Currency */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-[#777777] uppercase tracking-widest">
+                    Currency
+                  </label>
+                  <select
+                    value={filters.currency}
+                    onChange={(e) => set("currency", e.target.value)}
+                    aria-label="Filter by currency"
+                    disabled={availableCurrencies.length === 0}
+                    className={cn(
+                      "bg-[#0a0a0a] border border-[#333333] px-3 py-2",
+                      "text-xs text-white",
+                      "focus:outline-none focus:border-[#c9a962]",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                    )}
+                  >
+                    <option value="">All</option>
+                    {availableCurrencies.map((c) => (
+                      <option key={c} value={c}>
+                        {getCurrencyFlag(c) ? `${getCurrencyFlag(c)} ${c}` : c}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -421,7 +527,6 @@ export default function HistoryPage() {
                   />
                 </div>
 
-                {/* Reset */}
                 {hasActiveFilters && (
                   <button
                     onClick={() => setFilters(DEFAULT_FILTERS)}
@@ -431,11 +536,17 @@ export default function HistoryPage() {
                       "hover:border-[#c9a962] hover:text-[#c9a962] transition-colors duration-150",
                     )}
                   >
-                    Reset filters
+                    Clear filters
                   </button>
                 )}
               </div>
             </div>
+
+            {noteError && (
+              <div role="alert" className="mt-3 border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
+                {noteError}
+              </div>
+            )}
 
             {/* ── Table ── */}
             {filtered.length === 0 ? (
@@ -454,7 +565,6 @@ export default function HistoryPage() {
                 >
                   <thead>
                     <tr className="bg-[#c9a962]">
-                      {/* Sortable: DATE */}
                       <th
                         className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap cursor-pointer select-none"
                         onClick={() => toggleSort("timestamp")}
@@ -471,7 +581,6 @@ export default function HistoryPage() {
                       <th className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap">
                         TX HASH
                       </th>
-                      {/* Sortable: AMOUNT */}
                       <th
                         className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap cursor-pointer select-none"
                         onClick={() => toggleSort("amount")}
@@ -491,8 +600,18 @@ export default function HistoryPage() {
                       <th className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap">
                         BANK
                       </th>
-                      <th className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap">
-                        STATUS
+                      <th
+                        className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap cursor-pointer select-none"
+                        onClick={() => toggleSort("status")}
+                        aria-sort={
+                          filters.sortField === "status"
+                            ? filters.sortDir === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : "none"
+                        }
+                      >
+                        STATUS <SortIcon field="status" />
                       </th>
                       <th className="px-5 py-2.5 text-left text-[10px] tracking-[0.18em] font-semibold text-[#0a0a0a] uppercase whitespace-nowrap">
                         NOTE

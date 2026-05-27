@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { AnalyticsPeriod } from '@/types/analytics';
 import { FunnelChart } from '@/components/FunnelChart';
+import { AnalyticsDashboardSkeleton } from '@/components/skeletons';
 
 interface AnalyticsDashboardProps {
   userAddress: string;
@@ -44,7 +45,7 @@ export function AnalyticsDashboard({ userAddress }: AnalyticsDashboardProps) {
     }
   };
 
-  if (loading) return <div className="text-center py-8">Loading analytics...</div>;
+  if (loading) return <AnalyticsDashboardSkeleton />;
   if (error) return <div className="text-red-600 py-8">{error}</div>;
   if (!analytics) return <div className="text-center py-8">No data available</div>;
 

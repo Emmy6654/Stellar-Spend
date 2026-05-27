@@ -209,6 +209,11 @@ select:focus-visible,
   50% { opacity: 0.65; }
 }
 
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 .skeleton {
   background: var(--line);
   border-radius: 3px;
@@ -216,6 +221,28 @@ select:focus-visible,
   display: inline-block;
   pointer-events: none;
   user-select: none;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Shimmer overlay layered on top of the base pulse. */
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .skeleton::after { animation: none; }
 }
 
 @utility dot-bounce {

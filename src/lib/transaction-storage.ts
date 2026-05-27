@@ -130,4 +130,21 @@ export class TransactionStorage {
   static getFavoritesByUser(userAddress: string): Transaction[] {
     return this.getByUser(userAddress).filter(tx => tx.isFavorite);
   }
+
+  /**
+   * Apply an update locally and return a rollback function that restores
+   * the previous values. Use when the caller is also issuing a network
+   * request and wants to revert the local change if it fails.
+   */
+  static applyOptimistic(id: string, updates: Partial<Transaction>): () => void {
+    const prior = this.getById(id);
+    if (!prior) return () => {};
+    const snapshot: Partial<Transaction> = {};
+    for (const key of Object.keys(updates) as Array<keyof Transaction>) {
+      // Save the previous value for every key being changed so rollback is exact.
+      (snapshot as Record<string, unknown>)[key] = prior[key];
+    }
+    this.update(id, updates);
+    return () => this.update(id, snapshot);
+  }
 }

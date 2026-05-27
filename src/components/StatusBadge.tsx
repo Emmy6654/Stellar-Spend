@@ -9,7 +9,14 @@ import type { OfframpStep } from "@/types/stellaramp";
 // Config
 // ---------------------------------------------------------------------------
 
-type TransactionStatus = RecentOfframpRow["status"] | OfframpStep | "pending" | "completed" | "failed";
+type TransactionStatus =
+  | RecentOfframpRow["status"]
+  | OfframpStep
+  | "pending"
+  | "completed"
+  | "failed"
+  | "reversed"
+  | "partially_reversed";
 
 interface StatusConfig {
   label: string;
@@ -107,6 +114,18 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     tooltip: "Transaction failed.",
     colorClasses: "bg-red-500/10 border border-red-500/40 text-red-400",
     dotClasses: "bg-red-500",
+  },
+  reversed: {
+    label: "Reversed",
+    tooltip: "Transaction was fully reversed.",
+    colorClasses: "bg-purple-500/10 border border-purple-500/40 text-purple-400",
+    dotClasses: "bg-purple-500",
+  },
+  partially_reversed: {
+    label: "Partially Reversed",
+    tooltip: "Part of the transaction was reversed.",
+    colorClasses: "bg-purple-500/10 border border-purple-500/40 text-purple-400",
+    dotClasses: "bg-purple-500",
   },
 };
 
