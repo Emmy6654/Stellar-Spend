@@ -24,6 +24,8 @@ export interface Transaction {
   error?: string;
   /** User-supplied note for this transaction (max 500 chars) */
   note?: string;
+  /** Tags for organizing transactions */
+  tags?: Array<{ id: string; name: string; color: string }>;
   /** Reversal information */
   reversal?: {
     id: string;
@@ -146,5 +148,42 @@ export class TransactionStorage {
     }
     this.update(id, updates);
     return () => this.update(id, snapshot);
+  }
+
+  static addTag(id: string, tagName: string, color: string = '#3b82f6'): void {
+    const tx = this.getById(id);
+    if (!tx) return;
+    const tags = tx.tags || [];
+    const tagId = `tag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    tags.push({ id: tagId, name: tagName, color });
+    this.update(id, { tags });
+  }
+
+  static removeTag(id: string, tagId: string): void {
+    const tx = this.getById(id);
+    if (!tx?.tags) return;
+    this.update(id, { tags: tx.tags.filter(t => t.id !== tagId) });
+  }
+
+  static getTransactionsByTag(tagName: string): Transaction[] {
+    return this.getAll().filter(tx => tx.tags?.some(t => t.name === tagName));
+  }
+
+  static getAllTags(): Array<{ name: string; color: string; count: number }> {
+    const tagMap = new Map<string, { color: string; count: number }>();
+    this.getAll().forEach(tx => {
+      tx.tags?.forEach(tag => {
+        const existing = tagMap.get(tag.name);
+        tagMap.set(tag.name, {
+          color: tag.color,
+          count: (existing?.count || 0) + 1,
+        });
+      });
+    });
+    return Array.from(tagMap.entries()).map(([name, { color, count }]) => ({
+      name,
+      color,
+      count,
+    }));
   }
 }
