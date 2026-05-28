@@ -152,6 +152,46 @@ export async function getAllbridgeTokens(sdk: AllbridgeCoreSdk): Promise<{
   }
 }
 
+/**
+ * Find a specific token (e.g. USDC or USDT) on a given chain.
+ * Returns the token or throws if not found.
+ */
+export async function getAllbridgeToken(
+  sdk: AllbridgeCoreSdk,
+  chainKey: string,
+  tokenSymbol: string
+): Promise<TokenWithChainDetails> {
+  try {
+    const chainDetailsMap = await getCachedChainDetailsMap(sdk);
+    const chain = chainDetailsMap[chainKey];
+    if (!chain) throw new Error(`Chain ${chainKey} not found in Allbridge details`);
+    const token = chain.tokens.find((t: TokenWithChainDetails) => t.symbol === tokenSymbol.toUpperCase());
+    if (!token) throw new Error(`${tokenSymbol} not found on chain ${chainKey}`);
+    return token;
+  } catch (error) {
+    invalidateSdkCache();
+    throw error;
+  }
+}
+
+/**
+ * List all tokens available on a given chain (e.g. 'SRB' for Stellar).
+ */
+export async function getAllbridgeChainTokens(
+  sdk: AllbridgeCoreSdk,
+  chainKey: string
+): Promise<TokenWithChainDetails[]> {
+  try {
+    const chainDetailsMap = await getCachedChainDetailsMap(sdk);
+    const chain = chainDetailsMap[chainKey];
+    if (!chain) throw new Error(`Chain ${chainKey} not found`);
+    return chain.tokens;
+  } catch (error) {
+    invalidateSdkCache();
+    throw error;
+  }
+}
+
 // ─── Quote ────────────────────────────────────────────────────────────────────
 
 /**

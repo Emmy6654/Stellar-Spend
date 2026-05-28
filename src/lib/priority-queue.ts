@@ -62,6 +62,49 @@ export class TransactionPriorityQueue {
   };
   private waitTimes: number[] = [];
 
+  /**
+   * Remove a transaction from the queue by id.
+   * Returns true if found and removed.
+   */
+  remove(id: string): boolean {
+    const idx = this.heap.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    this.heap.splice(idx, 1);
+    // Rebuild heap after arbitrary removal
+    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+      this.sinkDown(i);
+    }
+    this.metrics.queueDepth = this.heap.length;
+    return true;
+  }
+
+  /**
+   * Override the priority of an existing queued transaction (admin use).
+   * Returns true if the transaction was found.
+   */
+  overridePriority(id: string, newPriority: TransactionPriority): boolean {
+    const tx = this.heap.find((t) => t.id === id);
+    if (!tx) return false;
+    tx.priority = newPriority;
+    // Rebuild heap to restore invariant
+    for (let i = Math.floor(this.heap.length / 2) - 1; i >= 0; i--) {
+      this.sinkDown(i);
+    }
+    for (let i = this.heap.length - 1; i > 0; i--) {
+      this.bubbleUp(i);
+    }
+    return true;
+  }
+
+  /**
+   * Return a snapshot of all items currently in the queue (read-only view).
+   */
+  getAll(): ReadonlyArray<QueuedTransaction> {
+    return [...this.heap].sort((a, b) =>
+      this.compare(a, b) ? -1 : this.compare(b, a) ? 1 : 0
+    );
+  }
+
   enqueue(tx: Omit<QueuedTransaction, 'enqueuedAt' | 'attempts'>): void {
     const item: QueuedTransaction = { ...tx, enqueuedAt: Date.now(), attempts: 0 };
     this.heap.push(item);

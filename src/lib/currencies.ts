@@ -43,8 +43,24 @@ export const SUPPORTED_CURRENCIES: CurrencyConfig[] = [
   // Asia
   { code: 'INR', name: 'Indian Rupee',           symbol: '₹',   decimals: 2, minAmount: 50,    maxAmount: 5_000_000,  active: true,  country: 'IN' },
   { code: 'PHP', name: 'Philippine Peso',        symbol: '₱',   decimals: 2, minAmount: 50,    maxAmount: 2_000_000,  active: true,  country: 'PH' },
-  // Middle East
+  // Middle East / North Africa
   { code: 'AED', name: 'UAE Dirham',             symbol: 'د.إ', decimals: 2, minAmount: 5,     maxAmount: 200_000,    active: true,  country: 'AE' },
+  { code: 'SAR', name: 'Saudi Riyal',            symbol: '﷼',   decimals: 2, minAmount: 5,     maxAmount: 500_000,    active: true,  country: 'SA' },
+  // Asia (expanded)
+  { code: 'IDR', name: 'Indonesian Rupiah',      symbol: 'Rp',  decimals: 0, minAmount: 10000, maxAmount: 500_000_000, active: true, country: 'ID' },
+  { code: 'PKR', name: 'Pakistani Rupee',        symbol: '₨',   decimals: 2, minAmount: 100,   maxAmount: 5_000_000,  active: true,  country: 'PK' },
+  { code: 'BDT', name: 'Bangladeshi Taka',       symbol: '৳',   decimals: 2, minAmount: 50,    maxAmount: 5_000_000,  active: true,  country: 'BD' },
+  { code: 'VND', name: 'Vietnamese Dong',        symbol: '₫',   decimals: 0, minAmount: 10000, maxAmount: 500_000_000, active: true, country: 'VN' },
+  { code: 'THB', name: 'Thai Baht',              symbol: '฿',   decimals: 2, minAmount: 20,    maxAmount: 1_000_000,  active: true,  country: 'TH' },
+  { code: 'MYR', name: 'Malaysian Ringgit',      symbol: 'RM',  decimals: 2, minAmount: 5,     maxAmount: 200_000,    active: true,  country: 'MY' },
+  // Americas (expanded)
+  { code: 'COP', name: 'Colombian Peso',         symbol: '$',   decimals: 2, minAmount: 1000,  maxAmount: 100_000_000, active: true, country: 'CO' },
+  { code: 'PEN', name: 'Peruvian Sol',           symbol: 'S/',  decimals: 2, minAmount: 5,     maxAmount: 200_000,    active: true,  country: 'PE' },
+  { code: 'CLP', name: 'Chilean Peso',           symbol: '$',   decimals: 0, minAmount: 1000,  maxAmount: 100_000_000, active: true, country: 'CL' },
+  { code: 'ARS', name: 'Argentine Peso',         symbol: '$',   decimals: 2, minAmount: 100,   maxAmount: 10_000_000, active: false, country: 'AR' },
+  // Africa (expanded)
+  { code: 'XAF', name: 'Central African CFA Franc', symbol: 'FCFA', decimals: 0, minAmount: 500, maxAmount: 10_000_000, active: true, country: 'CM' },
+  { code: 'TND', name: 'Tunisian Dinar',         symbol: 'DT',  decimals: 3, minAmount: 5,     maxAmount: 100_000,    active: false, country: 'TN' },
 ];
 
 /** Returns only active currencies */

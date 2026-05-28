@@ -29,6 +29,19 @@ const CURRENCY_FLAGS: Record<string, string> = {
   JPY: "🇯🇵", // Japanese Yen
   CNY: "🇨🇳", // Chinese Yuan
   AED: "🇦🇪", // UAE Dirham
+  SAR: "🇸🇦", // Saudi Riyal
+  IDR: "🇮🇩", // Indonesian Rupiah
+  PKR: "🇵🇰", // Pakistani Rupee
+  BDT: "🇧🇩", // Bangladeshi Taka
+  VND: "🇻🇳", // Vietnamese Dong
+  THB: "🇹🇭", // Thai Baht
+  MYR: "🇲🇾", // Malaysian Ringgit
+  COP: "🇨🇴", // Colombian Peso
+  PEN: "🇵🇪", // Peruvian Sol
+  CLP: "🇨🇱", // Chilean Peso
+  ARS: "🇦🇷", // Argentine Peso
+  XAF: "🇨🇲", // Central African CFA Franc (Cameroon as representative)
+  TND: "🇹🇳", // Tunisian Dinar
 };
 
 /**

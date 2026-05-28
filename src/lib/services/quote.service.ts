@@ -6,17 +6,24 @@ import { IQuoteService, QuoteResult } from './interfaces';
 import { validateAmount } from '@/lib/offramp/utils/validation';
 import { fetchPaycrestQuote, buildQuote, calculateBridgeAmount } from '@/lib/offramp/utils/quote-fetcher';
 import { isSupportedCurrency } from '@/lib/currencies';
+import { isSupportedStablecoin, calculateStablecoinBridgeFee } from '@/lib/stablecoins';
 import { CONFIG } from '@/lib/config';
 
 const FEE_METHOD_MAP: Record<string, 'stablecoin' | 'native'> = {
   USDC: 'stablecoin',
+  USDT: 'stablecoin',
   stablecoin: 'stablecoin',
   XLM: 'native',
   native: 'native',
 };
 
 export class QuoteService implements IQuoteService {
-  async getQuote(amount: string, currency: string, feeMethod: string): Promise<QuoteResult> {
+  async getQuote(
+    amount: string,
+    currency: string,
+    feeMethod: string,
+    token = 'USDC'
+  ): Promise<QuoteResult> {
     if (!this.validateAmount(amount)) {
       throw new Error('Invalid amount: must be a positive number');
     }
@@ -29,19 +36,21 @@ export class QuoteService implements IQuoteService {
       throw new Error(`Unsupported currency: ${currency}`);
     }
 
-    const normalizedFee = FEE_METHOD_MAP[feeMethod];
+    const normalizedToken = token.toUpperCase();
+    if (!isSupportedStablecoin(normalizedToken)) {
+      throw new Error(`Unsupported token: ${token}. Supported tokens: USDC, USDT`);
+    }
+
+    const normalizedFee = FEE_METHOD_MAP[feeMethod] ?? FEE_METHOD_MAP[normalizedToken];
     if (!normalizedFee) {
-      throw new Error('feeMethod must be "USDC", "XLM", "stablecoin", or "native"');
+      throw new Error('feeMethod must be "USDC", "USDT", "XLM", "stablecoin", or "native"');
     }
 
     const bridgeAmount = normalizedFee === 'stablecoin'
       ? calculateBridgeAmount(amount, 'stablecoin', CONFIG.FEES.STABLECOIN_FEE)
       : amount;
 
-    // Get bridge quote
-    const receiveAmount = await this.getBridgeQuote(bridgeAmount);
-
-    // Get Paycrest FX rate
+    const receiveAmount = await this.getBridgeQuote(bridgeAmount, normalizedToken);
     const { rate, destinationAmount } = await fetchPaycrestQuote(receiveAmount, currency);
 
     return buildQuote(
@@ -58,7 +67,7 @@ export class QuoteService implements IQuoteService {
     return validateAmount(amount);
   }
 
-  private async getBridgeQuote(bridgeAmount: string): Promise<string> {
+  private async getBridgeQuote(bridgeAmount: string, tokenSymbol = 'USDC'): Promise<string> {
     try {
       const { AllbridgeCoreSdk, nodeRpcUrlsDefault } = await import('@allbridge/bridge-core-sdk');
       const { env } = await import('@/lib/env');
@@ -84,12 +93,14 @@ export class QuoteService implements IQuoteService {
 
       if (!stellarChain || !baseChain) throw new Error('Chain details unavailable');
 
-      const stellarUsdc = stellarChain.tokens.find((t: any) => t.symbol === 'USDC');
-      const baseUsdc = baseChain.tokens.find((t: any) => t.symbol === 'USDC');
+      const stellarToken = stellarChain.tokens.find((t: any) => t.symbol === tokenSymbol)
+        ?? stellarChain.tokens.find((t: any) => t.symbol === 'USDC');
+      const baseToken = baseChain.tokens.find((t: any) => t.symbol === tokenSymbol)
+        ?? baseChain.tokens.find((t: any) => t.symbol === 'USDC');
 
-      if (!stellarUsdc || !baseUsdc) throw new Error('USDC token not found');
+      if (!stellarToken || !baseToken) throw new Error(`${tokenSymbol} token not found`);
 
-      return await sdk.getAmountToBeReceived(bridgeAmount, stellarUsdc, baseUsdc);
+      return await sdk.getAmountToBeReceived(bridgeAmount, stellarToken, baseToken);
     } catch (error) {
       throw new Error('Bridge quote unavailable');
     }

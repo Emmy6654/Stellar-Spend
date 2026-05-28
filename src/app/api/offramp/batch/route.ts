@@ -1,11 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createBatch, addTransactionToBatch, getBatchStatus } from '@/lib/services/batch.service';
+import {
+  createBatch,
+  addTransactionToBatch,
+  getBatchStatus,
+  getBatchProgress,
+  cancelBatch,
+  executeBatch,
+  getBatchAnalytics,
+} from '@/lib/services/batch.service';
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, transactions } = await req.json();
+    const body = await req.json();
+    const { action } = body;
 
-    const totalAmount = transactions.reduce((sum: number, t: any) => sum + t.amount, 0);
+    if (action === 'cancel') {
+      const { batchId } = body;
+      if (!batchId) return NextResponse.json({ error: 'Missing batchId' }, { status: 400 });
+      const result = await cancelBatch(batchId);
+      return NextResponse.json({ batchId, status: 'cancelled', result: result.rows[0] });
+    }
+
+    if (action === 'execute') {
+      const { batchId } = body;
+      if (!batchId) return NextResponse.json({ error: 'Missing batchId' }, { status: 400 });
+      const result = await executeBatch(batchId, async (payload) => {
+        // Placeholder handler — real handler wired at integration layer
+        return `tx_${Date.now()}`;
+      });
+      return NextResponse.json({ batchId, ...result });
+    }
+
+    const { userId, transactions } = body;
+    const totalAmount = transactions.reduce((sum: number, t: any) => sum + (t.amount ?? 0), 0);
     const batch = await createBatch(userId, totalAmount);
 
     for (const tx of transactions) {
@@ -14,26 +41,34 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ batchId: batch.id, status: 'created' });
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to create batch' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to process batch request' }, { status: 500 });
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const batchId = req.nextUrl.searchParams.get('batchId');
+    const { searchParams } = req.nextUrl;
+    const batchId = searchParams.get('batchId');
+    const view = searchParams.get('view');
+    const userId = searchParams.get('userId');
+
+    if (view === 'analytics') {
+      const analytics = await getBatchAnalytics(userId ?? undefined);
+      return NextResponse.json(analytics);
+    }
+
     if (!batchId) {
       return NextResponse.json({ error: 'Missing batchId' }, { status: 400 });
+    }
+
+    if (view === 'progress') {
+      const progress = await getBatchProgress(batchId);
+      return NextResponse.json(progress);
     }
 
     const status = await getBatchStatus(batchId);
     return NextResponse.json(status);
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to get batch status' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to get batch status' }, { status: 500 });
   }
 }
