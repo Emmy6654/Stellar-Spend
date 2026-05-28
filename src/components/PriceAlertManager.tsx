@@ -73,6 +73,7 @@ export function PriceAlertManager({ onAlertTriggered }: PriceAlertManagerProps) 
       targetPrice: parseFloat(formData.targetPrice),
       alertType: formData.alertType,
       status: 'active',
+      triggeredCount: 0,
     });
     refresh();
     setFormData({ currency: 'NGN', targetPrice: '', alertType: 'above' });
