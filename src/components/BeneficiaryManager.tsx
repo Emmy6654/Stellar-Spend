@@ -2,91 +2,302 @@
 
 import { useState, useEffect } from 'react';
 import { BeneficiaryStorage, SavedBeneficiary } from '@/lib/beneficiary-storage';
-import { Button } from '@/components/design-system/Button';
-import { Card } from '@/components/design-system/Card';
+import { cn } from '@/lib/cn';
+
+// Extended type stored in localStorage alongside SavedBeneficiary
+interface BeneficiaryMeta {
+  id: string;
+  usageCount: number;
+  verificationStatus: 'unverified' | 'pending' | 'verified';
+  group: string;
+}
+
+const META_KEY = 'stellar_spend_beneficiary_meta';
+
+function getMeta(): Record<string, BeneficiaryMeta> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(localStorage.getItem(META_KEY) ?? '{}'); } catch { return {}; }
+}
+
+function saveMeta(meta: Record<string, BeneficiaryMeta>) {
+  if (typeof window !== 'undefined') localStorage.setItem(META_KEY, JSON.stringify(meta));
+}
+
+function getOrCreateMeta(id: string): BeneficiaryMeta {
+  const all = getMeta();
+  if (!all[id]) {
+    all[id] = { id, usageCount: 0, verificationStatus: 'unverified', group: 'Default' };
+    saveMeta(all);
+  }
+  return all[id];
+}
+
+function updateMeta(id: string, updates: Partial<BeneficiaryMeta>) {
+  const all = getMeta();
+  all[id] = { ...getOrCreateMeta(id), ...updates };
+  saveMeta(all);
+}
+
+function incrementUsage(id: string) {
+  const meta = getOrCreateMeta(id);
+  updateMeta(id, { usageCount: meta.usageCount + 1 });
+}
+
+const CURRENCIES = ['NGN', 'KES', 'GHS'];
+const GROUPS = ['Default', 'Family', 'Business', 'Friends'];
+
+const verificationBadge = (status: BeneficiaryMeta['verificationStatus']) => {
+  if (status === 'verified') return { label: 'Verified', cls: 'text-green-400 border-green-400' };
+  if (status === 'pending') return { label: 'Pending', cls: 'text-yellow-400 border-yellow-400' };
+  return { label: 'Unverified', cls: 'text-[#555555] border-[#333333]' };
+};
+
+type View = 'list' | 'add' | 'edit';
+
+const emptyForm = { name: '', accountNumber: '', bankCode: '', currency: 'NGN', group: 'Default' };
 
 export function BeneficiaryManager() {
   const [beneficiaries, setBeneficiaries] = useState<SavedBeneficiary[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', accountNumber: '', bankCode: '', currency: 'NGN' });
+  const [metaMap, setMetaMap] = useState<Record<string, BeneficiaryMeta>>({});
+  const [view, setView] = useState<View>('list');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState(emptyForm);
+  const [filterGroup, setFilterGroup] = useState<string>('All');
 
-  useEffect(() => {
-    setBeneficiaries(BeneficiaryStorage.getAllBeneficiaries());
-  }, []);
+  const reload = () => {
+    const all = BeneficiaryStorage.getAllBeneficiaries();
+    setBeneficiaries(all);
+    const meta = getMeta();
+    // Ensure meta exists for all beneficiaries
+    all.forEach((b) => { if (!meta[b.id]) meta[b.id] = { id: b.id, usageCount: 0, verificationStatus: 'unverified', group: 'Default' }; });
+    saveMeta(meta);
+    setMetaMap({ ...meta });
+  };
+
+  useEffect(() => { reload(); }, []);
 
   const handleSave = () => {
     if (!formData.name || !formData.accountNumber || !formData.bankCode) return;
-    BeneficiaryStorage.saveBeneficiary(formData);
-    setBeneficiaries(BeneficiaryStorage.getAllBeneficiaries());
-    setFormData({ name: '', accountNumber: '', bankCode: '', currency: 'NGN' });
-    setShowForm(false);
+    if (editingId) {
+      BeneficiaryStorage.updateBeneficiary(editingId, {
+        name: formData.name,
+        accountNumber: formData.accountNumber,
+        bankCode: formData.bankCode,
+        currency: formData.currency,
+      });
+      updateMeta(editingId, { group: formData.group });
+    } else {
+      const saved = BeneficiaryStorage.saveBeneficiary({
+        name: formData.name,
+        accountNumber: formData.accountNumber,
+        bankCode: formData.bankCode,
+        currency: formData.currency,
+      });
+      updateMeta(saved.id, { group: formData.group });
+    }
+    reload();
+    setFormData(emptyForm);
+    setEditingId(null);
+    setView('list');
+  };
+
+  const handleEdit = (b: SavedBeneficiary) => {
+    const meta = getOrCreateMeta(b.id);
+    setFormData({
+      name: b.name,
+      accountNumber: b.accountNumber || '',
+      bankCode: b.bankCode || '',
+      currency: b.currency,
+      group: meta.group,
+    });
+    setEditingId(b.id);
+    setView('edit');
   };
 
   const handleDelete = (id: string) => {
     BeneficiaryStorage.deleteBeneficiary(id);
-    setBeneficiaries(Beneficiaries.getAllBeneficiaries());
+    reload();
   };
 
+  const handleVerify = (id: string) => {
+    updateMeta(id, { verificationStatus: 'pending' });
+    // Simulate async verification
+    setTimeout(() => {
+      updateMeta(id, { verificationStatus: 'verified' });
+      setMetaMap({ ...getMeta() });
+    }, 1500);
+    setMetaMap({ ...getMeta() });
+  };
+
+  const handleUse = (id: string) => {
+    incrementUsage(id);
+    setMetaMap({ ...getMeta() });
+  };
+
+  const allGroups = ['All', ...GROUPS];
+  const filtered = filterGroup === 'All'
+    ? beneficiaries
+    : beneficiaries.filter((b) => (metaMap[b.id]?.group ?? 'Default') === filterGroup);
+
+  const groupCounts = GROUPS.reduce<Record<string, number>>((acc, g) => {
+    acc[g] = beneficiaries.filter((b) => (metaMap[b.id]?.group ?? 'Default') === g).length;
+    return acc;
+  }, {});
+
   return (
-    <Card className="p-4">
-      <h3 className="text-lg font-semibold mb-4">Saved Beneficiaries</h3>
-      
-      {beneficiaries.length > 0 && (
-        <div className="space-y-2 mb-4">
-          {beneficiaries.map(b => (
-            <div key={b.id} className="flex justify-between items-center p-2 bg-gray-100 rounded">
-              <div>
-                <p className="font-medium">{b.name}</p>
-                <p className="text-sm text-gray-600">{b.currency}</p>
-              </div>
-              <button onClick={() => handleDelete(b.id)} className="text-red-600 hover:text-red-800">
-                Delete
+    <div className="border border-[#333333] bg-[#111111] p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-white tracking-wider uppercase">Beneficiaries</h2>
+        {view === 'list' && (
+          <button
+            onClick={() => { setFormData(emptyForm); setEditingId(null); setView('add'); }}
+            className="text-[10px] uppercase tracking-widest px-3 py-1.5 border border-[#c9a962] text-[#c9a962] hover:bg-[#c9a962] hover:text-[#0a0a0a] transition-colors"
+          >
+            + Add
+          </button>
+        )}
+      </div>
+
+      {/* List View */}
+      {view === 'list' && (
+        <>
+          {/* Group filter */}
+          <div className="flex flex-wrap gap-2">
+            {allGroups.map((g) => (
+              <button
+                key={g}
+                onClick={() => setFilterGroup(g)}
+                className={cn(
+                  'text-[10px] uppercase tracking-widest px-3 py-1 border transition-colors',
+                  filterGroup === g
+                    ? 'border-[#c9a962] text-[#c9a962]'
+                    : 'border-[#333333] text-[#555555] hover:text-[#777777]',
+                )}
+              >
+                {g}{g !== 'All' && groupCounts[g] > 0 ? ` (${groupCounts[g]})` : ''}
               </button>
+            ))}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-xs text-[#555555] text-center py-4">No beneficiaries found</div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map((b) => {
+                const meta = metaMap[b.id] ?? { usageCount: 0, verificationStatus: 'unverified', group: 'Default' };
+                const badge = verificationBadge(meta.verificationStatus);
+                return (
+                  <div key={b.id} className="border border-[#222222] p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-white font-semibold">{b.name}</span>
+                          <span className={cn('text-[9px] uppercase tracking-widest border px-1.5 py-0.5', badge.cls)}>
+                            {badge.label}
+                          </span>
+                          <span className="text-[9px] text-[#555555] border border-[#222222] px-1.5 py-0.5">
+                            {meta.group}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[#777777] mt-0.5">{b.currency}</div>
+                        <div className="text-[10px] text-[#555555] mt-0.5">Used {meta.usageCount} time{meta.usageCount !== 1 ? 's' : ''}</div>
+                      </div>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        {meta.verificationStatus === 'unverified' && (
+                          <button
+                            onClick={() => handleVerify(b.id)}
+                            className="text-[9px] uppercase tracking-widest px-2 py-1 border border-[#333333] text-[#777777] hover:border-yellow-400 hover:text-yellow-400 transition-colors"
+                          >
+                            Verify
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleUse(b.id)}
+                          className="text-[9px] uppercase tracking-widest px-2 py-1 border border-[#333333] text-[#777777] hover:border-[#c9a962] hover:text-[#c9a962] transition-colors"
+                        >
+                          Use
+                        </button>
+                        <button
+                          onClick={() => handleEdit(b)}
+                          className="text-[9px] uppercase tracking-widest px-2 py-1 border border-[#333333] text-[#777777] hover:border-[#c9a962] hover:text-[#c9a962] transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b.id)}
+                          className="text-[9px] uppercase tracking-widest px-2 py-1 border border-[#333333] text-[#777777] hover:border-red-400 hover:text-red-400 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
-      {showForm ? (
-        <div className="space-y-2">
-          <input
-            type="text"
-            placeholder="Name"
-            value={formData.name}
-            onChange={e => setFormData({ ...formData, name: e.target.value })}
-            className="w-full p-2 border rounded"
-          />
-          <input
-            type="text"
-            placeholder="Account Number"
-            value={formData.accountNumber}
-            onChange={e => setFormData({ ...formData, accountNumber: e.target.value })}
-            className="w-full p-2 border rounded"
-          />
-          <input
-            type="text"
-            placeholder="Bank Code"
-            value={formData.bankCode}
-            onChange={e => setFormData({ ...formData, bankCode: e.target.value })}
-            className="w-full p-2 border rounded"
-          />
+      {/* Add / Edit Form */}
+      {(view === 'add' || view === 'edit') && (
+        <div className="space-y-3">
+          <div className="text-[10px] text-[#777777] uppercase tracking-widest">
+            {view === 'edit' ? 'Edit Beneficiary' : 'New Beneficiary'}
+          </div>
+          {[
+            { key: 'name', placeholder: 'Full Name', label: 'Name' },
+            { key: 'accountNumber', placeholder: 'Account Number', label: 'Account Number' },
+            { key: 'bankCode', placeholder: 'Bank Code', label: 'Bank Code' },
+          ].map(({ key, placeholder, label }) => (
+            <input
+              key={key}
+              type="text"
+              placeholder={placeholder}
+              aria-label={label}
+              value={formData[key as keyof typeof formData]}
+              onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+              className="w-full bg-[#0a0a0a] border border-[#333333] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#c9a962]"
+            />
+          ))}
           <select
             value={formData.currency}
-            onChange={e => setFormData({ ...formData, currency: e.target.value })}
-            className="w-full p-2 border rounded"
+            onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+            aria-label="Currency"
+            className="w-full bg-[#0a0a0a] border border-[#333333] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#c9a962]"
           >
-            <option value="NGN">NGN</option>
-            <option value="KES">KES</option>
-            <option value="GHS">GHS</option>
+            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          <div className="flex gap-2">
-            <Button onClick={handleSave}>Save</Button>
-            <Button onClick={() => setShowForm(false)} variant="secondary">Cancel</Button>
+          <select
+            value={formData.group}
+            onChange={(e) => setFormData({ ...formData, group: e.target.value })}
+            aria-label="Group"
+            className="w-full bg-[#0a0a0a] border border-[#333333] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#c9a962]"
+          >
+            {GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleSave}
+              disabled={!formData.name || !formData.accountNumber || !formData.bankCode}
+              className={cn(
+                'flex-1 text-[10px] uppercase tracking-widest px-4 py-2 border transition-colors',
+                formData.name && formData.accountNumber && formData.bankCode
+                  ? 'border-[#c9a962] text-[#c9a962] hover:bg-[#c9a962] hover:text-[#0a0a0a]'
+                  : 'border-[#333333] text-[#444444] cursor-not-allowed',
+              )}
+            >
+              {view === 'edit' ? 'Update' : 'Save'}
+            </button>
+            <button
+              onClick={() => { setView('list'); setEditingId(null); setFormData(emptyForm); }}
+              className="flex-1 text-[10px] uppercase tracking-widest px-4 py-2 border border-[#333333] text-[#777777] hover:border-[#555555] transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
-      ) : (
-        <Button onClick={() => setShowForm(true)}>Add Beneficiary</Button>
       )}
-    </Card>
+    </div>
   );
 }
