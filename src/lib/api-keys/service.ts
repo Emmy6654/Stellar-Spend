@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { pool } from '@/lib/db/client';
-import type { ApiKeyRecord, ApiKeyUsageEvent, ApiKeyWithSecret } from '@/lib/api-keys/types';
+import type { ApiKeyAnalytics, ApiKeyRecord, ApiKeyScope, ApiKeyUsageEvent, ApiKeyWithSecret } from '@/lib/api-keys/types';
 
 class PerKeyRateLimiter {
   private readonly store = new Map<string, { count: number; resetTime: number }>();
@@ -34,11 +34,19 @@ function hashApiKey(value: string): string {
 }
 
 function mapApiKey(row: Record<string, unknown>): ApiKeyRecord {
+  const rawScopes = row.scopes;
+  const scopes: ApiKeyScope[] = Array.isArray(rawScopes)
+    ? (rawScopes as ApiKeyScope[])
+    : typeof rawScopes === 'string' && rawScopes
+      ? (JSON.parse(rawScopes) as ApiKeyScope[])
+      : [];
+
   return {
     id: row.id as string,
     name: row.name as string,
     keyPrefix: row.key_prefix as string,
     status: row.status as ApiKeyRecord['status'],
+    scopes,
     rateLimitMaxRequests: Number(row.rate_limit_max_requests),
     rateLimitWindowMs: Number(row.rate_limit_window_ms),
     usageCount: Number(row.usage_count),
@@ -97,6 +105,7 @@ export function isValidAdminToken(token: string | null): boolean {
 
 export async function createApiKey(input: {
   name: string;
+  scopes?: ApiKeyScope[];
   rateLimitMaxRequests?: number;
   rateLimitWindowMs?: number;
   expiresAt?: number;
@@ -109,14 +118,15 @@ export async function createApiKey(input: {
 
   const rateLimitMaxRequests = input.rateLimitMaxRequests ?? 60;
   const rateLimitWindowMs = input.rateLimitWindowMs ?? 60_000;
+  const scopes = input.scopes ?? ['transactions:read'];
 
   const result = await pool.query(
     `
       INSERT INTO api_keys (
         id, name, key_prefix, key_hash, status,
-        rate_limit_max_requests, rate_limit_window_ms,
+        scopes, rate_limit_max_requests, rate_limit_window_ms,
         expires_at, rotated_from_key_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $9)
+      ) VALUES ($1, $2, $3, $4, 'active', $5::jsonb, $6, $7, $8, $9, $10, $10)
       RETURNING *
     `,
     [
@@ -124,6 +134,7 @@ export async function createApiKey(input: {
       input.name,
       generated.keyPrefix,
       keyHash,
+      JSON.stringify(scopes),
       rateLimitMaxRequests,
       rateLimitWindowMs,
       input.expiresAt ?? null,
@@ -277,4 +288,76 @@ export async function listApiKeyUsage(apiKeyId: string): Promise<ApiKeyUsageEven
   );
 
   return result.rows.map((row) => mapUsageEvent(row));
+}
+
+export async function getApiKeyAnalytics(apiKeyId: string): Promise<ApiKeyAnalytics | null> {
+  const keyRecord = await getApiKeyById(apiKeyId);
+  if (!keyRecord) return null;
+
+  const [totalsResult, topPathsResult, byDayResult] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          COUNT(*)                                        AS total_requests,
+          COUNT(*) FILTER (WHERE status_code < 400)      AS success_requests,
+          COUNT(*) FILTER (WHERE status_code >= 400)      AS error_requests,
+          COUNT(*) FILTER (WHERE limited = TRUE)          AS rate_limited_requests,
+          MIN(used_at)                                    AS first_used_at
+        FROM api_key_usage_events
+        WHERE api_key_id = $1
+      `,
+      [apiKeyId]
+    ),
+    pool.query(
+      `
+        SELECT path, COUNT(*) AS count
+        FROM api_key_usage_events
+        WHERE api_key_id = $1
+        GROUP BY path
+        ORDER BY count DESC
+        LIMIT 10
+      `,
+      [apiKeyId]
+    ),
+    pool.query(
+      `
+        SELECT
+          TO_CHAR(TO_TIMESTAMP(used_at / 1000), 'YYYY-MM-DD') AS date,
+          COUNT(*) AS count
+        FROM api_key_usage_events
+        WHERE api_key_id = $1
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT 30
+      `,
+      [apiKeyId]
+    ),
+  ]);
+
+  const totals = totalsResult.rows[0];
+  const totalRequests = Number(totals.total_requests);
+  const successRequests = Number(totals.success_requests);
+  const errorRequests = Number(totals.error_requests);
+  const rateLimitedRequests = Number(totals.rate_limited_requests);
+
+  const firstUsedAt = totals.first_used_at ? Number(totals.first_used_at) : null;
+  const spanMs = firstUsedAt ? Date.now() - firstUsedAt : 0;
+  const spanHours = spanMs > 0 ? spanMs / 3_600_000 : 1;
+  const averageRequestsPerHour = totalRequests / spanHours;
+
+  return {
+    apiKeyId,
+    totalRequests,
+    successRequests,
+    errorRequests,
+    rateLimitedRequests,
+    successRate: totalRequests > 0 ? successRequests / totalRequests : 0,
+    topPaths: topPathsResult.rows.map((r) => ({ path: r.path as string, count: Number(r.count) })),
+    requestsByDay: byDayResult.rows.map((r) => ({ date: r.date as string, count: Number(r.count) })),
+    averageRequestsPerHour,
+  };
+}
+
+export function hasScope(apiKey: ApiKeyRecord, scope: ApiKeyScope): boolean {
+  return apiKey.scopes.includes('admin') || apiKey.scopes.includes(scope);
 }

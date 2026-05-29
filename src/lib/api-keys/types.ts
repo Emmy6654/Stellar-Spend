@@ -1,10 +1,20 @@
 export type ApiKeyStatus = 'active' | 'rotated' | 'revoked';
 
+export type ApiKeyScope =
+  | 'transactions:read'
+  | 'transactions:write'
+  | 'analytics:read'
+  | 'wallets:read'
+  | 'webhooks:read'
+  | 'webhooks:write'
+  | 'admin';
+
 export interface ApiKeyRecord {
   id: string;
   name: string;
   keyPrefix: string;
   status: ApiKeyStatus;
+  scopes: ApiKeyScope[];
   rateLimitMaxRequests: number;
   rateLimitWindowMs: number;
   usageCount: number;
@@ -32,4 +42,16 @@ export interface ApiKeyUsageEvent {
   ipAddress?: string;
   usedAt: number;
   metadata?: Record<string, unknown>;
+}
+
+export interface ApiKeyAnalytics {
+  apiKeyId: string;
+  totalRequests: number;
+  successRequests: number;
+  errorRequests: number;
+  rateLimitedRequests: number;
+  successRate: number;
+  topPaths: { path: string; count: number }[];
+  requestsByDay: { date: string; count: number }[];
+  averageRequestsPerHour: number;
 }
