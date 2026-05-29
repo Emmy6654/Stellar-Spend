@@ -154,7 +154,7 @@ export async function markDelivered(recordId: string, attemptCount: number): Pro
 }
 
 /**
- * Mark a record as permanently failed and clear the next retry time.
+ * Mark a record as permanently failed, write to DLQ, and send failure notification.
  */
 export async function markFailed(record: DeliveryRecord): Promise<void> {
     await updateRecord(record.id, {
@@ -172,6 +172,19 @@ export async function markFailed(record: DeliveryRecord): Promise<void> {
             attemptCount: record.attemptCount,
         }),
     );
+
+    // Write to DLQ and send failure notification
+    try {
+        const { write } = await import("./dlq");
+        const { notify } = await import("./alert-service");
+        const dlqEntry = await write(record);
+        await notify(dlqEntry);
+    } catch (err) {
+        console.error("Failed to write DLQ entry or send alert", {
+            deliveryId: record.id,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
 }
 
 function isTimeoutError(err: unknown): boolean {
