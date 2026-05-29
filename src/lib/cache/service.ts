@@ -1,0 +1,136 @@
+import { getCacheClient } from "./client";
+import { TTL, CacheKey } from "./keys";
+
+// ─── Metrics ──────────────────────────────────────────────────────────────────
+
+const metrics = { hits: 0, misses: 0 };
+
+export function getCacheMetrics() {
+  return { ...metrics };
+}
+
+// ─── Generic helpers ──────────────────────────────────────────────────────────
+
+async function getOrSet<T>(
+  key: string,
+  ttl: number,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  const client = getCacheClient();
+  const cached = await client.get(key);
+
+  if (cached !== null) {
+    metrics.hits++;
+    return JSON.parse(cached) as T;
+  }
+
+  metrics.misses++;
+  const value = await fetcher();
+  await client.set(key, JSON.stringify(value), ttl);
+  return value;
+}
+
+// ─── Rate cache ───────────────────────────────────────────────────────────────
+
+export async function getCachedRate(
+  currency: string,
+  fetcher: () => Promise<number>,
+): Promise<number> {
+  return getOrSet(CacheKey.rate(currency), TTL.RATE, fetcher);
+}
+
+export async function invalidateRate(currency: string): Promise<void> {
+  await getCacheClient().del(CacheKey.rate(currency));
+}
+
+// ─── Quote cache ──────────────────────────────────────────────────────────────
+
+export async function getCachedQuote<T>(
+  amount: string,
+  currency: string,
+  feeMethod: string,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  return getOrSet(CacheKey.quote(amount, currency, feeMethod), TTL.QUOTE, fetcher);
+}
+
+export async function invalidateQuotes(): Promise<void> {
+  await getCacheClient().flushPattern("quote:*");
+}
+
+// ─── Currencies cache ─────────────────────────────────────────────────────────
+
+export async function getCachedCurrencies<T>(fetcher: () => Promise<T>): Promise<T> {
+  return getOrSet(CacheKey.currencies(), TTL.CURRENCIES, fetcher);
+}
+
+export async function invalidateCurrencies(): Promise<void> {
+  await getCacheClient().del(CacheKey.currencies());
+}
+
+// ─── Institutions cache ───────────────────────────────────────────────────────
+
+export async function getCachedInstitutions<T>(
+  currency: string,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  return getOrSet(CacheKey.institutions(currency), TTL.INSTITUTIONS, fetcher);
+}
+
+export async function invalidateInstitutions(currency?: string): Promise<void> {
+  if (currency) {
+    await getCacheClient().del(CacheKey.institutions(currency));
+  } else {
+    await getCacheClient().flushPattern("institutions:*");
+  }
+}
+
+// ─── Transaction cache ────────────────────────────────────────────────────────
+
+export async function getCachedTransaction<T>(
+  id: string,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  return getOrSet(CacheKey.transaction(id), TTL.TRANSACTION, fetcher);
+}
+
+export async function invalidateTransaction(id: string): Promise<void> {
+  await getCacheClient().del(CacheKey.transaction(id));
+}
+
+// ─── Cache warming ────────────────────────────────────────────────────────────
+
+/**
+ * Warm the cache on startup by pre-fetching commonly accessed data.
+ * Call this from your app initialization code.
+ */
+export async function warmCache(): Promise<void> {
+  const client = getCacheClient();
+  const isAlive = await client.ping();
+  if (!isAlive) {
+    console.warn("[cache] Cache unavailable — skipping warm-up");
+    return;
+  }
+
+  console.log("[cache] Starting cache warm-up...");
+
+  try {
+    // Warm currencies
+    const { getCurrencies } = await import("../currencies");
+    await getCachedCurrencies(getCurrencies);
+    console.log("[cache] Warmed: currencies");
+  } catch (err) {
+    console.warn("[cache] Failed to warm currencies:", err);
+  }
+
+  try {
+    // Warm NGN rate (most common)
+    const { getRate } = await import("../services/quote.service");
+    await getCachedRate("NGN", () => getRate("NGN"));
+    console.log("[cache] Warmed: NGN rate");
+  } catch (err) {
+    console.warn("[cache] Failed to warm NGN rate:", err);
+  }
+
+  console.log("[cache] Cache warm-up complete");
+}
