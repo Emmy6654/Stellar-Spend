@@ -21,6 +21,7 @@
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^14.6.1",
     "@zxing/browser": "^0.2.0",
+    "isomorphic-dompurify": "^2.11.0",
     "next": "^15.5.14",
     "pg": "^8.21.0",
     "react": "19.0.0",

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { registry } from "./src/lib/api-versioning/registry";
 import { recordApiTiming } from "./src/lib/performance";
 import { logger } from "./src/lib/logger";
+import { addSecurityHeaders } from "./src/lib/security/headers";
 
 // Matches /api/v{n}/... and captures the version segment
 const VERSIONED_PATH_RE = /^\/api\/(v\d+)(\/.*)?$/;
@@ -67,7 +68,7 @@ export function middleware(request: NextRequest): NextResponse {
         const level = response.status >= 500 ? 'error' : response.status >= 400 ? 'warn' : 'info';
         log[level]('http.request', { method: request.method, path: pathname, status: response.status, durationMs });
         response.headers.set('X-Request-Id', requestId);
-        return response;
+        return addSecurityHeaders(response);
     }
 
     // 1. Check for versioned URL path: /api/v{n}/*
