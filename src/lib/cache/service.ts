@@ -3,7 +3,7 @@ import { TTL, CacheKey } from "./keys";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
-const metrics = { hits: 0, misses: 0 };
+const metrics = { hits: 0, misses: 0, staleHits: 0 };
 
 export function getCacheMetrics() {
   return { ...metrics };
@@ -11,22 +11,52 @@ export function getCacheMetrics() {
 
 // ─── Generic helpers ──────────────────────────────────────────────────────────
 
+interface CacheEntry<T> {
+  value: T;
+  timestamp: number;
+}
+
 async function getOrSet<T>(
   key: string,
   ttl: number,
   fetcher: () => Promise<T>,
+  staleWhileRevalidate?: number,
 ): Promise<T> {
   const client = getCacheClient();
   const cached = await client.get(key);
 
   if (cached !== null) {
-    metrics.hits++;
-    return JSON.parse(cached) as T;
+    try {
+      const entry = JSON.parse(cached) as CacheEntry<T>;
+      const age = (Date.now() - entry.timestamp) / 1000;
+
+      // Fresh cache hit
+      if (age < ttl) {
+        metrics.hits++;
+        return entry.value;
+      }
+
+      // Stale-while-revalidate: return stale data while revalidating in background
+      if (staleWhileRevalidate && age < ttl + staleWhileRevalidate) {
+        metrics.staleHits++;
+        // Revalidate in background without blocking
+        fetcher()
+          .then((value) => {
+            const newEntry: CacheEntry<T> = { value, timestamp: Date.now() };
+            return client.set(key, JSON.stringify(newEntry), ttl);
+          })
+          .catch((err) => console.error(`[cache] Background revalidation failed for ${key}:`, err));
+        return entry.value;
+      }
+    } catch {
+      // Invalid cache entry, treat as miss
+    }
   }
 
   metrics.misses++;
   const value = await fetcher();
-  await client.set(key, JSON.stringify(value), ttl);
+  const entry: CacheEntry<T> = { value, timestamp: Date.now() };
+  await client.set(key, JSON.stringify(entry), ttl + (staleWhileRevalidate || 0));
   return value;
 }
 
@@ -36,7 +66,7 @@ export async function getCachedRate(
   currency: string,
   fetcher: () => Promise<number>,
 ): Promise<number> {
-  return getOrSet(CacheKey.rate(currency), TTL.RATE, fetcher);
+  return getOrSet(CacheKey.rate(currency), TTL.RATE, fetcher, TTL.RATE);
 }
 
 export async function invalidateRate(currency: string): Promise<void> {
@@ -51,7 +81,7 @@ export async function getCachedQuote<T>(
   feeMethod: string,
   fetcher: () => Promise<T>,
 ): Promise<T> {
-  return getOrSet(CacheKey.quote(amount, currency, feeMethod), TTL.QUOTE, fetcher);
+  return getOrSet(CacheKey.quote(amount, currency, feeMethod), TTL.QUOTE, fetcher, TTL.QUOTE);
 }
 
 export async function invalidateQuotes(): Promise<void> {
@@ -61,7 +91,7 @@ export async function invalidateQuotes(): Promise<void> {
 // ─── Currencies cache ─────────────────────────────────────────────────────────
 
 export async function getCachedCurrencies<T>(fetcher: () => Promise<T>): Promise<T> {
-  return getOrSet(CacheKey.currencies(), TTL.CURRENCIES, fetcher);
+  return getOrSet(CacheKey.currencies(), TTL.CURRENCIES, fetcher, 3600);
 }
 
 export async function invalidateCurrencies(): Promise<void> {
@@ -74,7 +104,7 @@ export async function getCachedInstitutions<T>(
   currency: string,
   fetcher: () => Promise<T>,
 ): Promise<T> {
-  return getOrSet(CacheKey.institutions(currency), TTL.INSTITUTIONS, fetcher);
+  return getOrSet(CacheKey.institutions(currency), TTL.INSTITUTIONS, fetcher, 3600);
 }
 
 export async function invalidateInstitutions(currency?: string): Promise<void> {
@@ -91,7 +121,7 @@ export async function getCachedTransaction<T>(
   id: string,
   fetcher: () => Promise<T>,
 ): Promise<T> {
-  return getOrSet(CacheKey.transaction(id), TTL.TRANSACTION, fetcher);
+  return getOrSet(CacheKey.transaction(id), TTL.TRANSACTION, fetcher, 300);
 }
 
 export async function invalidateTransaction(id: string): Promise<void> {

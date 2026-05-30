@@ -1,4 +1,4 @@
-export { getCacheClient, resetCacheClient } from "./client";
+export { getCacheClient, resetCacheClient, getPoolMetrics } from "./client";
 export { TTL, CacheKey } from "./keys";
 export {
   getCachedRate,
@@ -14,3 +14,4 @@ export {
   warmCache,
   getCacheMetrics,
 } from "./service";
+export { withCaching, setCacheHeaders, invalidateCachePattern } from "./middleware";
