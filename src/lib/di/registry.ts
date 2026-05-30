@@ -2,7 +2,7 @@
  * Service Registry - Pre-configured services for the application
  */
 
-import { DIContainer } from './container';
+import { DIContainer, ServiceLifetime } from './container';
 import { IQuoteService, IBridgeService, IPayoutService } from '@/lib/services/interfaces';
 import { QuoteService } from '@/lib/services/quote.service';
 import { BridgeService } from '@/lib/services/bridge.service';
@@ -16,29 +16,35 @@ export const SERVICE_KEYS = {
   WALLET_MANAGER: 'WalletManager',
 } as const;
 
+export interface ServiceConfig {
+  key: string | symbol;
+  lifetime: ServiceLifetime;
+  factory: () => any;
+}
+
 /**
  * Configure the DI container with all application services
  */
 export function configureServices(container: DIContainer): void {
-  // Register services as singletons
+  // Register services with appropriate lifetimes
   container.registerSingleton<IQuoteService>(
     SERVICE_KEYS.QUOTE_SERVICE,
-    new QuoteService()
+    () => new QuoteService()
   );
 
   container.registerSingleton<IBridgeService>(
     SERVICE_KEYS.BRIDGE_SERVICE,
-    new BridgeService()
+    () => new BridgeService()
   );
 
   container.registerSingleton<IPayoutService>(
     SERVICE_KEYS.PAYOUT_SERVICE,
-    new PayoutService()
+    () => new PayoutService()
   );
 
   container.registerSingleton<WalletManager>(
     SERVICE_KEYS.WALLET_MANAGER,
-    new WalletManager()
+    () => new WalletManager()
   );
 }
 
@@ -47,9 +53,10 @@ export function configureServices(container: DIContainer): void {
  */
 export async function getService<T>(
   container: DIContainer,
-  key: string
+  key: string,
+  scopeId?: string
 ): Promise<T> {
-  return container.resolve<T>(key);
+  return container.resolve<T>(key, scopeId);
 }
 
 /**
@@ -57,7 +64,18 @@ export async function getService<T>(
  */
 export function getServiceSync<T>(
   container: DIContainer,
-  key: string
+  key: string,
+  scopeId?: string
 ): T {
-  return container.resolveSync<T>(key);
+  return container.resolveSync<T>(key, scopeId);
+}
+
+/**
+ * Validate all services in the container
+ */
+export async function validateServices(container: DIContainer): Promise<void> {
+  const result = await container.validate();
+  if (!result.valid) {
+    throw new Error(`DI validation failed:\n${result.errors.join('\n')}`);
+  }
 }

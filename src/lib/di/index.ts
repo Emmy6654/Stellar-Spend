@@ -4,3 +4,4 @@
 
 export * from './container';
 export * from './registry';
+export { ServiceLifetime } from './container';
