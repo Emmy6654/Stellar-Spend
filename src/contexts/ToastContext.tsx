@@ -10,13 +10,17 @@ interface Toast {
   type: ToastType;
 }
 
-interface ToastContextValue {
+interface ToastStateContextValue {
   toasts: Toast[];
+}
+
+interface ToastActionContextValue {
   showToast: (message: string, type?: ToastType) => void;
   removeToast: (id: string) => void;
 }
 
-const ToastContext = createContext<ToastContextValue | undefined>(undefined);
+const ToastStateContext = createContext<ToastStateContextValue | undefined>(undefined);
+const ToastActionContext = createContext<ToastActionContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -34,16 +38,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ toasts, showToast, removeToast }}>
-      {children}
-    </ToastContext.Provider>
+    <ToastStateContext.Provider value={{ toasts }}>
+      <ToastActionContext.Provider value={{ showToast, removeToast }}>
+        {children}
+      </ToastActionContext.Provider>
+    </ToastStateContext.Provider>
   );
 }
 
-export function useToast() {
-  const context = useContext(ToastContext);
+export function useToasts() {
+  const context = useContext(ToastStateContext);
   if (!context) {
-    throw new Error("useToast must be used within ToastProvider");
+    throw new Error("useToasts must be used within ToastProvider");
+  }
+  return context.toasts;
+}
+
+export function useToastActions() {
+  const context = useContext(ToastActionContext);
+  if (!context) {
+    throw new Error("useToastActions must be used within ToastProvider");
   }
   return context;
+}
+
+export function useToast() {
+  const toasts = useToasts();
+  const actions = useToastActions();
+  return { toasts, ...actions };
 }

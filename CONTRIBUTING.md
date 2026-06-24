@@ -37,7 +37,23 @@ Thank you for your interest in contributing to Stellar Spend! This document prov
    npm run dev
    ```
 
-5. **Verify formatting and linting**
+### Component Development
+
+We use Storybook for isolated component development and documentation.
+
+1. **Start Storybook**
+
+   ```bash
+   npm run storybook
+   ```
+
+2. **Creating Stories**
+   When creating or updating a UI component, add a `.stories.tsx` file in the same directory. Ensure stories cover:
+   - Different variants and states (loading, disabled, etc.)
+   - Edge cases for input data
+   - Accessibility checks using the integrated `axe` addon
+
+3. **Verify formatting and linting**
    ```bash
    npm run format:check
    npm run lint

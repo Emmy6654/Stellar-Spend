@@ -1,17 +1,39 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+  useTransition,
+} from "react";
 import { useStellarWallet } from "@/hooks/useStellarWallet";
-import FormCard, { type OfframpPayload, type QuoteResult } from "@/components/FormCard";
+import FormCard, {
+  type OfframpPayload,
+  type QuoteResult,
+} from "@/components/FormCard";
 import RightPanel from "@/components/RightPanel";
 import RecentOfframpsTable from "@/components/RecentOfframpsTable";
 import ProgressSteps from "@/components/ProgressSteps";
 import { TransactionProgressModal } from "@/components/TransactionProgressModal";
 import { Header } from "@/components/Header";
-import { TransactionStorage, type Transaction } from "@/lib/transaction-storage";
-import { pollBridgeStatus, pollPayoutStatus } from "@/lib/offramp/utils/polling";
+import {
+  TransactionStorage,
+  type Transaction,
+} from "@/lib/transaction-storage";
+import {
+  pollBridgeStatus,
+  pollPayoutStatus,
+} from "@/lib/offramp/utils/polling";
 import type { OfframpStep } from "@/types/stellaramp";
 import { useFunnelTracking } from "@/hooks/useFunnelTracking";
+import React from "react";
+
+// Memoize sub-components for better performance
+const MemoizedHeader = React.memo(Header);
+const MemoizedProgressSteps = React.memo(ProgressSteps);
+const MemoizedRecentOfframpsTable = React.memo(RecentOfframpsTable);
 
 // ---------------------------------------------------------------------------
 // Horizon balance helpers
@@ -33,7 +55,7 @@ function fmt(value: string, fractions: { min: number; max: number }): string {
 }
 
 async function fetchStellarBalances(
-  publicKey: string
+  publicKey: string,
 ): Promise<{ usdc: string; xlm: string }> {
   try {
     const res = await fetch(`${HORIZON_URL}/accounts/${publicKey}`);
@@ -51,7 +73,7 @@ async function fetchStellarBalances(
       (b) =>
         b.asset_type === "credit_alphanum4" &&
         b.asset_code === "USDC" &&
-        b.asset_issuer === USDC_ISSUER
+        b.asset_issuer === USDC_ISSUER,
     );
 
     return {
@@ -68,8 +90,16 @@ async function fetchStellarBalances(
 // ---------------------------------------------------------------------------
 
 export default function StellarSpendDashboard() {
-  const { wallet, isConnected, isConnecting, connect, disconnect, signTransaction } = useStellarWallet();
+  const {
+    wallet,
+    isConnected,
+    isConnecting,
+    connect,
+    disconnect,
+    signTransaction,
+  } = useStellarWallet();
   const { trackStep } = useFunnelTracking();
+  const [isPending, startTransition] = useTransition();
 
   // Balances
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
@@ -122,10 +152,14 @@ export default function StellarSpendDashboard() {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!isConnected || !wallet?.publicKey) {
-      setTransactions([]);
+      startTransition(() => {
+        setTransactions([]);
+      });
       return;
     }
-    setTransactions(TransactionStorage.getByUser(wallet.publicKey));
+    startTransition(() => {
+      setTransactions(TransactionStorage.getByUser(wallet.publicKey));
+    });
   }, [isConnected, wallet?.publicKey]);
 
   // ---------------------------------------------------------------------------
@@ -145,7 +179,9 @@ export default function StellarSpendDashboard() {
     setAmount("");
     setCurrency("");
     setQuote(null);
-    setTransactions([]);
+    startTransition(() => {
+      setTransactions([]);
+    });
   }, [disconnect]);
 
   // ---------------------------------------------------------------------------
@@ -154,41 +190,44 @@ export default function StellarSpendDashboard() {
   const MIN_XLM_RESERVE = 3;
   const ESTIMATED_GAS = 2.5;
 
-  function parseBalance(raw: string | null): number {
+  const parseBalance = useCallback((raw: string | null): number => {
     if (!raw) return 0;
     return Number(raw.replace(/,/g, ""));
-  }
+  }, []);
 
-  function checkBalance(payload: OfframpPayload): string | null {
-    const usdc = parseBalance(usdcBalance);
-    const needed = Number(payload.amount);
+  const checkBalance = useCallback(
+    (payload: OfframpPayload): string | null => {
+      const usdc = parseBalance(usdcBalance);
+      const needed = Number(payload.amount);
 
-    if (!isNaN(needed) && needed > usdc) {
-      return `Insufficient USDC balance. You have ${usdcBalance ?? "0"} USDC but are trying to send ${payload.amount} USDC.`;
-    }
-
-    if (payload.feeMethod === "XLM") {
-      const xlm = parseBalance(xlmBalance);
-      const required = MIN_XLM_RESERVE + ESTIMATED_GAS;
-      if (xlm < required) {
-        return `Insufficient XLM for gas. You need at least ${required} XLM (Reserve + Gas) but have ${xlmBalance ?? "0"} XLM. Try switching to USDC fee payment.`;
+      if (!isNaN(needed) && needed > usdc) {
+        return `Insufficient USDC balance. You have ${usdcBalance ?? "0"} USDC but are trying to send ${payload.amount} USDC.`;
       }
-    }
 
-    return null;
-  }
+      if (payload.feeMethod === "XLM") {
+        const xlm = parseBalance(xlmBalance);
+        const required = MIN_XLM_RESERVE + ESTIMATED_GAS;
+        if (xlm < required) {
+          return `Insufficient XLM for gas. You need at least ${required} XLM (Reserve + Gas) but have ${xlmBalance ?? "0"} XLM. Try switching to USDC fee payment.`;
+        }
+      }
+
+      return null;
+    },
+    [usdcBalance, xlmBalance, parseBalance],
+  );
 
   // ---------------------------------------------------------------------------
-  // Soroban tx status poller (for PENDING status)
+  // Polling logic memoized
   // ---------------------------------------------------------------------------
-  async function pollSorobanTx(txHash: string): Promise<void> {
+  const pollSorobanTx = useCallback(async (txHash: string): Promise<void> => {
     const maxAttempts = 30;
     const interval = 3000;
     let attempt = 0;
 
     while (attempt < maxAttempts) {
       if (abortRef.current) throw new Error("Polling cancelled");
-      
+
       attempt++;
       const res = await fetch(`/api/offramp/bridge/tx-status/${txHash}`);
       const data = await res.json();
@@ -198,71 +237,80 @@ export default function StellarSpendDashboard() {
         return;
       }
       if (status === "FAILED") {
-        throw new Error("Transaction failed on-chain. Your wallet was not debited.");
+        throw new Error(
+          "Transaction failed on-chain. Your wallet was not debited.",
+        );
       }
       if (status === "NOT_FOUND") {
-        // Keep polling, tx may not be indexed yet
-        await new Promise(resolve => setTimeout(resolve, interval));
+        await new Promise((resolve) => setTimeout(resolve, interval));
         continue;
       }
 
-      await new Promise(resolve => setTimeout(resolve, interval));
+      await new Promise((resolve) => setTimeout(resolve, interval));
     }
 
-    throw new Error("Transaction was not confirmed within 90s. It may have expired.");
-  }
+    throw new Error(
+      "Transaction was not confirmed within 90s. It may have expired.",
+    );
+  }, []);
 
-  // ---------------------------------------------------------------------------
-  // Bridge status poller
-  // ---------------------------------------------------------------------------
-  async function pollBridge(txHash: string, txId: string): Promise<void> {
-    await pollBridgeStatus(
-      async () => {
-        if (abortRef.current) return { status: "failed" };
-        const res = await fetch(`/api/offramp/bridge/status/${txHash}`);
-        const data = await res.json();
-        return { status: data.status ?? "pending" };
-      },
-      ["completed", "failed", "expired"],
-      {
-        interval: 5000,
-        timeout: 600_000,
-        onProgress: () => {
-          if (!abortRef.current) setModalStep("processing");
+  const pollBridge = useCallback(
+    async (txHash: string, txId: string): Promise<void> => {
+      await pollBridgeStatus(
+        async () => {
+          if (abortRef.current) return { status: "failed" };
+          const res = await fetch(`/api/offramp/bridge/status/${txHash}`);
+          const data = await res.json();
+          return { status: data.status ?? "pending" };
         },
+        ["completed", "failed", "expired"],
+        {
+          interval: 5000,
+          timeout: 600_000,
+          onProgress: () => {
+            if (!abortRef.current) setModalStep("processing");
+          },
+        },
+      );
+
+      TransactionStorage.update(txId, { bridgeStatus: "completed" });
+    },
+    [],
+  );
+
+  const pollPayout = useCallback(
+    async (orderId: string, txId: string): Promise<void> => {
+      setModalStep("settling");
+
+      const result = await pollPayoutStatus(
+        async () => {
+          if (abortRef.current) return { status: "expired" };
+          const res = await fetch(`/api/offramp/status/${orderId}`);
+          const data = await res.json();
+          return { status: data.status ?? "pending" };
+        },
+        ["settled", "refunded", "expired"],
+        {
+          interval: 10_000,
+          timeout: 600_000,
+        },
+      );
+
+      if (result.status === "settled") {
+        TransactionStorage.update(txId, {
+          payoutStatus: "settled",
+          status: "completed",
+        });
+      } else {
+        TransactionStorage.update(txId, {
+          payoutStatus: result.status,
+          status: "failed",
+        });
+        throw new Error(`Payout ended with status: ${result.status}`);
       }
-    );
-
-    TransactionStorage.update(txId, { bridgeStatus: "completed" });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Payout status poller
-  // ---------------------------------------------------------------------------
-  async function pollPayout(orderId: string, txId: string): Promise<void> {
-    setModalStep("settling");
-
-    const result = await pollPayoutStatus(
-      async () => {
-        if (abortRef.current) return { status: "expired" };
-        const res = await fetch(`/api/offramp/status/${orderId}`);
-        const data = await res.json();
-        return { status: data.status ?? "pending" };
-      },
-      ["settled", "refunded", "expired"],
-      {
-        interval: 10_000,
-        timeout: 600_000,
-      }
-    );
-
-    if (result.status === "settled") {
-      TransactionStorage.update(txId, { payoutStatus: "settled", status: "completed" });
-    } else {
-      TransactionStorage.update(txId, { payoutStatus: result.status, status: "failed" });
-      throw new Error(`Payout ended with status: ${result.status}`);
-    }
-  }
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Main trade execution flow
@@ -282,7 +330,10 @@ export default function StellarSpendDashboard() {
       abortRef.current = false;
       setModalError(undefined);
       setModalStep("initiating");
-      trackStep("form_fill", { amount: payload.amount, currency: payload.currency });
+      trackStep("form_fill", {
+        amount: payload.amount,
+        currency: payload.currency,
+      });
 
       // Create a pending transaction record
       const txId = TransactionStorage.generateId();
@@ -316,9 +367,13 @@ export default function StellarSpendDashboard() {
           }),
         });
         const buildData = await buildRes.json();
-        if (!buildRes.ok) throw new Error(buildData.error ?? "Failed to build transaction");
+        if (!buildRes.ok)
+          throw new Error(buildData.error ?? "Failed to build transaction");
 
-        const { xdr, toAddress } = buildData as { xdr: string; toAddress: string };
+        const { xdr, toAddress } = buildData as {
+          xdr: string;
+          toAddress: string;
+        };
 
         // Step 2 — sign transaction (wallet prompt)
         trackStep("quote_received");
@@ -333,9 +388,13 @@ export default function StellarSpendDashboard() {
           body: JSON.stringify({ signedXdr }),
         });
         const submitData = await submitRes.json();
-        if (!submitRes.ok) throw new Error(submitData.error ?? "Failed to submit transaction");
+        if (!submitRes.ok)
+          throw new Error(submitData.error ?? "Failed to submit transaction");
 
-        const { status: submitStatus, hash: txHash } = submitData as { status: string; hash: string };
+        const { status: submitStatus, hash: txHash } = submitData as {
+          status: string;
+          hash: string;
+        };
         TransactionStorage.update(txId, { stellarTxHash: txHash });
         trackStep("tx_submitted", { txHash });
 
@@ -370,7 +429,8 @@ export default function StellarSpendDashboard() {
           }),
         });
         const payoutData = await payoutRes.json();
-        if (!payoutRes.ok) throw new Error(payoutData.error ?? "Failed to execute payout");
+        if (!payoutRes.ok)
+          throw new Error(payoutData.error ?? "Failed to execute payout");
 
         const { orderId } = payoutData as { orderId: string };
         TransactionStorage.update(txId, { payoutOrderId: orderId });
@@ -381,7 +441,10 @@ export default function StellarSpendDashboard() {
 
         // Success
         setModalStep("success");
-        trackStep("completed", { amount: payload.amount, currency: payload.currency });
+        trackStep("completed", {
+          amount: payload.amount,
+          currency: payload.currency,
+        });
         setFormResetKey((k: number) => k + 1);
 
         // Refresh balances and history
@@ -391,15 +454,23 @@ export default function StellarSpendDashboard() {
         setTransactions(TransactionStorage.getByUser(wallet.publicKey));
       } catch (err: unknown) {
         if (abortRef.current) return; // user navigated away
-        const msg = err instanceof Error ? err.message : "An unexpected error occurred";
+        const msg =
+          err instanceof Error ? err.message : "An unexpected error occurred";
         TransactionStorage.update(txId, { status: "failed", error: msg });
         setTransactions(TransactionStorage.getByUser(wallet.publicKey));
         setModalError(msg);
         setModalStep("error");
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [wallet?.publicKey, usdcBalance, xlmBalance, signTransaction, trackStep]
+    [
+      wallet?.publicKey,
+      checkBalance,
+      pollSorobanTx,
+      pollBridge,
+      pollPayout,
+      signTransaction,
+      trackStep,
+    ],
   );
 
   // Cleanup polling on unmount
@@ -408,6 +479,18 @@ export default function StellarSpendDashboard() {
       abortRef.current = true;
     };
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Memoized values for children
+  // ---------------------------------------------------------------------------
+  const balanceData = useMemo(
+    () => ({
+      usdc: usdcBalance,
+      xlm: xlmBalance,
+      isLoading: isBalanceLoading,
+    }),
+    [usdcBalance, xlmBalance, isBalanceLoading],
+  );
 
   // ---------------------------------------------------------------------------
   // Render
@@ -423,15 +506,21 @@ export default function StellarSpendDashboard() {
         }}
       />
 
-      <Header
+      <MemoizedHeader
         subtitle="Offramp Dashboard"
         isConnected={isConnected}
         isConnecting={isConnecting}
         walletAddress={wallet?.publicKey}
-        walletType={wallet?.type === "freighter" ? "Freighter" : wallet?.type === "lobstr" ? "Lobstr" : null}
-        stellarUsdcBalance={usdcBalance}
-        stellarXlmBalance={xlmBalance}
-        isBalanceLoading={isBalanceLoading}
+        walletType={
+          wallet?.type === "freighter"
+            ? "Freighter"
+            : wallet?.type === "lobstr"
+              ? "Lobstr"
+              : null
+        }
+        stellarUsdcBalance={balanceData.usdc}
+        stellarXlmBalance={balanceData.xlm}
+        isBalanceLoading={balanceData.isLoading}
         onConnect={handleConnect}
         onDisconnect={handleDisconnect}
       />
@@ -470,12 +559,15 @@ export default function StellarSpendDashboard() {
 
           {/* Recent offramps */}
           <div>
-            <RecentOfframpsTable />
+            <MemoizedRecentOfframpsTable />
           </div>
 
           {/* Progress steps */}
           <div className="min-[1100px]:col-span-2 mt-4">
-            <ProgressSteps isConnected={isConnected} isConnecting={isConnecting} />
+            <MemoizedProgressSteps
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+            />
           </div>
         </div>
       </section>

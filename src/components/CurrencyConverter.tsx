@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useTransition,
+} from "react";
 import { cn } from "@/lib/cn";
 import type { FxRate } from "@/app/api/fx-rates/route";
+import React from "react";
 
-interface CurrencyConverterProps {
+export default function CurrencyConverter({
+  className,
+}: {
   className?: string;
-}
-
-export default function CurrencyConverter({ className }: CurrencyConverterProps) {
+}) {
   const [fromAmount, setFromAmount] = useState("100");
   const [toAmount, setToAmount] = useState("");
   const [fromCurrency, setFromCurrency] = useState("USDC");
@@ -18,27 +25,23 @@ export default function CurrencyConverter({ className }: CurrencyConverterProps)
   const [loading, setLoading] = useState(false);
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
-  useEffect(() => {
-    fetchCurrencies();
-    fetchRate();
-    const interval = setInterval(fetchRate, 30000);
-    return () => clearInterval(interval);
-  }, [toCurrency]);
-
-  const fetchCurrencies = async () => {
+  const fetchCurrencies = useCallback(async () => {
     try {
       const res = await fetch("/api/offramp/currencies");
       if (res.ok) {
         const data = await res.json();
-        setCurrencies(data.currencies || []);
+        startTransition(() => {
+          setCurrencies(data.currencies || []);
+        });
       }
     } catch (error) {
       console.error("Failed to fetch currencies:", error);
     }
-  };
+  }, []);
 
-  const fetchRate = async () => {
+  const fetchRate = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/offramp/rate");
@@ -51,43 +54,75 @@ export default function CurrencyConverter({ className }: CurrencyConverterProps)
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleFromAmountChange = (value: string) => {
-    setFromAmount(value);
-    if (rate && value) {
-      const amount = parseFloat(value);
-      const total = amount * rate;
-      const afterFees = total - (amount * parseFloat(fees.bridge) / 100);
-      setToAmount(afterFees.toFixed(2));
-    }
-  };
+  useEffect(() => {
+    fetchCurrencies();
+    fetchRate();
+    const interval = setInterval(fetchRate, 30000);
+    return () => clearInterval(interval);
+  }, [toCurrency, fetchCurrencies, fetchRate]);
 
-  const handleToAmountChange = (value: string) => {
-    setToAmount(value);
-    if (rate && value) {
-      const amount = parseFloat(value);
-      const beforeFees = amount / (1 - parseFloat(fees.bridge) / 100);
-      setFromAmount((beforeFees / rate).toFixed(2));
-    }
-  };
+  const handleFromAmountChange = useCallback(
+    (value: string) => {
+      setFromAmount(value);
+      if (rate && value) {
+        const amount = parseFloat(value);
+        const total = amount * rate;
+        const afterFees = total - (amount * parseFloat(fees.bridge)) / 100;
+        setToAmount(afterFees.toFixed(2));
+      } else {
+        setToAmount("");
+      }
+    },
+    [rate, fees.bridge],
+  );
 
-  const swapCurrencies = () => {
+  const handleToAmountChange = useCallback(
+    (value: string) => {
+      setToAmount(value);
+      if (rate && value) {
+        const amount = parseFloat(value);
+        const beforeFees = amount / (1 - parseFloat(fees.bridge) / 100);
+        setFromAmount((beforeFees / rate).toFixed(2));
+      } else {
+        setFromAmount("");
+      }
+    },
+    [rate, fees.bridge],
+  );
+
+  const swapCurrencies = useCallback(() => {
     setFromCurrency(toCurrency);
     setToCurrency(fromCurrency);
     setFromAmount(toAmount);
     setToAmount(fromAmount);
-  };
+  }, [fromCurrency, toCurrency, fromAmount, toAmount]);
 
-  const copyResult = () => {
+  const copyResult = useCallback(() => {
     const text = `${fromAmount} ${fromCurrency} = ${toAmount} ${toCurrency}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
+  }, [fromAmount, fromCurrency, toAmount, toCurrency]);
+
+  const currencyOptions = useMemo(
+    () =>
+      currencies.map((curr) => (
+        <option key={curr} value={curr}>
+          {curr}
+        </option>
+      )),
+    [currencies],
+  );
 
   return (
-    <div className={cn("rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900", className)}>
+    <div
+      className={cn(
+        "rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900",
+        className,
+      )}
+    >
       <h2 className="mb-4 text-lg font-semibold">Currency Converter</h2>
 
       {/* From Amount */}
@@ -143,11 +178,7 @@ export default function CurrencyConverter({ className }: CurrencyConverterProps)
             onChange={(e) => setToCurrency(e.target.value)}
             className="rounded border border-gray-300 px-3 py-2 dark:border-gray-600 dark:bg-gray-800"
           >
-            {currencies.map((curr) => (
-              <option key={curr} value={curr}>
-                {curr}
-              </option>
-            ))}
+            {currencyOptions}
           </select>
         </div>
       </div>
@@ -181,14 +212,16 @@ export default function CurrencyConverter({ className }: CurrencyConverterProps)
           "w-full rounded px-4 py-2 font-medium transition-colors",
           copied
             ? "bg-green-500 text-white"
-            : "bg-blue-500 text-white hover:bg-blue-600"
+            : "bg-blue-500 text-white hover:bg-blue-600",
         )}
       >
         {copied ? "Copied!" : "Copy Result"}
       </button>
 
       {loading && (
-        <p className="mt-2 text-center text-sm text-gray-500">Updating rates...</p>
+        <p className="mt-2 text-center text-sm text-gray-500">
+          Updating rates...
+        </p>
       )}
     </div>
   );
