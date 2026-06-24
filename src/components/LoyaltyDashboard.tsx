@@ -14,6 +14,8 @@ import {
   DEFAULT_PROGRAM_CONFIG,
   pointsToUSDC,
 } from "@/lib/loyalty";
+import { useI18n } from "@/lib/i18n";
+import { TierUpgradeNotification } from "./TierUpgradeNotification";
 
 interface Props {
   userAddress: string;
@@ -36,6 +38,9 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
   const [redeemPoints, setRedeemPoints] = useState("");
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemSuccess, setRedeemSuccess] = useState<string | null>(null);
+  const [upgradedTier, setUpgradedTier] = useState<LoyaltyTier | null>(null);
+
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!userAddress) return;
@@ -65,7 +70,7 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
     if (result.success) {
       setProfile(result.profile);
       setRedemptionHistory(LoyaltyStorage.getRedemptionHistory(userAddress));
-      setRedeemSuccess(`Redeemed ${points} pts for $${result.usdcValue.toFixed(2)} USDC`);
+      setRedeemSuccess(`${t('loyalty.redeem')} ${points} pts for $${result.usdcValue.toFixed(2)} USDC`);
       setRedeemPoints("");
     } else {
       setRedeemError(result.error ?? "Redemption failed");
@@ -85,104 +90,133 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
 
   return (
     <div className="border border-[#333333] bg-[#111111] p-5 space-y-4">
+      <TierUpgradeNotification 
+        tier={upgradedTier} 
+        onClose={() => setUpgradedTier(null)} 
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-white tracking-wider uppercase">Loyalty Status</h2>
-        <span
-          className="text-xs font-bold tracking-widest uppercase px-3 py-1 border"
-          style={{ color: tierConfig.color, borderColor: tierConfig.color + "55" }}
-        >
-          {tierConfig.label}
-        </span>
+        <h2 className="text-sm font-semibold text-white tracking-wider uppercase">{t('loyalty.title')}</h2>
+        <div className="flex flex-col items-end">
+          <span
+            className="text-[10px] font-bold tracking-widest uppercase px-3 py-1 border animate-pulse"
+            style={{ color: tierConfig.color, borderColor: tierConfig.color + "55" }}
+          >
+            {tierConfig.label} {t('loyalty.tier')}
+          </span>
+        </div>
       </div>
 
       {/* Points Balance */}
-      <div className="border border-[#222222] p-3 flex items-center justify-between">
+      <div className="border border-[#222222] p-4 flex items-center justify-between bg-gradient-to-r from-[#111111] to-[#1a1a1a]">
         <div>
-          <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">Points Balance</div>
-          <div className="text-2xl text-white font-bold tabular-nums">{profile.points.toLocaleString()}</div>
-          <div className="text-[10px] text-[#555555] mt-0.5">
+          <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">{t('loyalty.points_balance')}</div>
+          <div className="text-3xl text-white font-bold tabular-nums tracking-tighter">
+            {profile.points.toLocaleString()}
+            <span className="text-xs ml-1 font-normal text-[#555555]">pts</span>
+          </div>
+          <div className="text-[10px] text-[#555555] mt-1 font-mono">
             ≈ ${pointsToUSDC(profile.points, config).toFixed(2)} USDC
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">Lifetime</div>
-          <div className="text-sm text-[#aaaaaa] tabular-nums">{profile.lifetimePoints.toLocaleString()} pts</div>
+        <div className="text-right border-l border-[#222222] pl-4">
+          <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">{t('loyalty.lifetime_points')}</div>
+          <div className="text-sm text-[#aaaaaa] tabular-nums font-semibold">{profile.lifetimePoints.toLocaleString()}</div>
         </div>
       </div>
 
       {/* Progress to next tier */}
       {nextTier && remaining !== null && (
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-[10px] text-[#777777]">
-            <span>Progress to {nextTier.label}</span>
-            <span>{remaining.toLocaleString("en-US", { maximumFractionDigits: 0 })} USDC remaining</span>
+        <div className="space-y-2 p-3 border border-[#222222] bg-[#0a0a0a]">
+          <div className="flex justify-between items-end">
+            <div className="space-y-0.5">
+              <span className="text-[10px] text-[#777777] uppercase tracking-widest block">
+                {t('loyalty.progress_to')} {nextTier.label}
+              </span>
+              <span className="text-xs text-white font-bold">
+                {progressPct.toFixed(1)}% {t('common.success').toLowerCase()}
+              </span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] text-[#c9a962] font-mono block">
+                {remaining.toLocaleString("en-US", { maximumFractionDigits: 0 })} USDC {t('loyalty.remaining')}
+              </span>
+            </div>
           </div>
-          <div className="h-1.5 bg-[#222222] w-full">
+          <div className="h-2 bg-[#222222] w-full rounded-full overflow-hidden">
             <div
-              className="h-full transition-all duration-500"
+              className="h-full transition-all duration-1000 ease-out relative"
               style={{ width: `${progressPct}%`, backgroundColor: nextTier.color }}
-            />
+            >
+              <div className="absolute inset-0 bg-white/20 animate-pulse" />
+            </div>
           </div>
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-[#222222]">
+      <div className="flex border-b border-[#222222] overflow-x-auto scrollbar-hide">
         {(["overview", "rewards", "tiers", "history"] as Tab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-3 py-2 text-[10px] uppercase tracking-widest transition-colors ${
+            className={`px-4 py-2 text-[10px] uppercase tracking-widest transition-all whitespace-nowrap ${
               activeTab === tab
-                ? "text-[#c9a962] border-b border-[#c9a962] -mb-px"
+                ? "text-[#c9a962] border-b-2 border-[#c9a962] -mb-[2px] font-bold"
                 : "text-[#555555] hover:text-[#777777]"
             }`}
           >
-            {tab}
+            {t(`navigation.${tab === 'history' ? 'history' : tab === 'overview' ? 'home' : tab}`)}
           </button>
         ))}
       </div>
 
       {/* Overview Tab */}
       {activeTab === "overview" && (
-        <div className="space-y-3">
+        <div className="space-y-4 animate-in fade-in duration-500">
           <div className="grid grid-cols-2 gap-3">
-            <div className="border border-[#222222] p-3">
+            <div className="border border-[#222222] p-3 hover:border-[#333333] transition-colors">
               <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">Total Volume</div>
               <div className="text-sm text-white font-semibold tabular-nums">
-                {profile.totalVolume.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                {profile.totalVolume.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-[10px] text-[#555555]">USDC</span>
               </div>
             </div>
-            <div className="border border-[#222222] p-3">
+            <div className="border border-[#222222] p-3 hover:border-[#333333] transition-colors">
               <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-1">Transactions</div>
               <div className="text-sm text-white font-semibold tabular-nums">{profile.transactionCount}</div>
             </div>
           </div>
-          <div>
-            <div className="text-[10px] text-[#777777] uppercase tracking-widest mb-2">Exclusive Benefits</div>
-            <ul className="space-y-1">
+          
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-[#222222]" />
+              <div className="text-[10px] text-[#777777] uppercase tracking-widest">{t('loyalty.exclusive_benefits')}</div>
+              <div className="h-px flex-1 bg-[#222222]" />
+            </div>
+            <div className="grid grid-cols-1 gap-2">
               {tierConfig.benefits.map((b) => (
-                <li key={b} className="flex items-center gap-2 text-xs text-[#aaaaaa]">
-                  <span style={{ color: tierConfig.color }}>✓</span>
+                <div key={b} className="flex items-center gap-3 text-xs text-[#aaaaaa] bg-[#1a1a1a] p-2 border border-[#222222]">
+                  <span className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px]" style={{ backgroundColor: tierConfig.color + '22', color: tierConfig.color }}>✓</span>
                   {b}
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
-          <div className="border border-[#222222] p-3 space-y-1">
-            <div className="text-[10px] text-[#777777] uppercase tracking-widest">Multipliers & Limits</div>
+
+          <div className="border border-[#222222] p-3 space-y-2 bg-[#0a0a0a]">
+            <div className="text-[10px] text-[#777777] uppercase tracking-widest border-b border-[#222222] pb-1 mb-2">{t('loyalty.multipliers_limits')}</div>
             <div className="flex justify-between text-xs text-[#aaaaaa]">
-              <span>Points multiplier</span>
-              <span className="text-white">{tierConfig.pointsMultiplier}×</span>
+              <span>{t('loyalty.points_multiplier')}</span>
+              <span className="text-white font-mono">{tierConfig.pointsMultiplier}×</span>
             </div>
             <div className="flex justify-between text-xs text-[#aaaaaa]">
-              <span>Fee discount</span>
-              <span className="text-white">{(tierConfig.feeDiscount * 100).toFixed(2)}%</span>
+              <span>{t('loyalty.fee_discount')}</span>
+              <span className="text-green-400 font-mono">{(tierConfig.feeDiscount * 100).toFixed(2)}%</span>
             </div>
             <div className="flex justify-between text-xs text-[#aaaaaa]">
-              <span>Daily withdrawal limit</span>
-              <span className="text-white">{tierConfig.withdrawalLimit.toLocaleString()} USDC</span>
+              <span>{t('loyalty.withdrawal_limit')}</span>
+              <span className="text-white font-mono">{tierConfig.withdrawalLimit.toLocaleString()} USDC</span>
             </div>
           </div>
         </div>
@@ -190,9 +224,9 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
 
       {/* Rewards Catalog Tab */}
       {activeTab === "rewards" && (
-        <div className="space-y-3">
-          {redeemError && <p className="text-xs text-red-400">{redeemError}</p>}
-          {redeemSuccess && <p className="text-xs text-green-400">{redeemSuccess}</p>}
+        <div className="space-y-3 animate-in fade-in duration-500">
+          {redeemError && <div className="p-2 bg-red-900/20 border border-red-500/50 text-[10px] text-red-400 uppercase tracking-widest">{redeemError}</div>}
+          {redeemSuccess && <div className="p-2 bg-green-900/20 border border-green-500/50 text-[10px] text-green-400 uppercase tracking-widest">{redeemSuccess}</div>}
 
           <div className="space-y-2">
             {REWARDS_CATALOG.map((reward) => {
@@ -205,28 +239,33 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
                 <div
                   key={reward.id}
                   className={cn(
-                    "border p-3 flex items-center justify-between",
-                    available ? "border-[#333333]" : "border-[#1a1a1a] opacity-50",
+                    "border p-3 flex items-center justify-between transition-all",
+                    available ? "border-[#333333] bg-[#1a1a1a]" : "border-[#1a1a1a] opacity-50 grayscale",
                   )}
                 >
-                  <div>
-                    <div className="text-xs text-white font-semibold">{reward.name}</div>
-                    <div className="text-[10px] text-[#777777] mt-0.5">{reward.description}</div>
-                    <div className="text-[10px] mt-1" style={{ color: tierCfg.color }}>
-                      {tierCfg.label}+ · {reward.points.toLocaleString()} pts
+                  <div className="space-y-1">
+                    <div className="text-xs text-white font-bold uppercase tracking-tight">{reward.name}</div>
+                    <div className="text-[10px] text-[#777777]">{reward.description}</div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-sm bg-black/40 border border-white/10" style={{ color: tierCfg.color }}>
+                        {tierCfg.label}+
+                      </span>
+                      <span className="text-[10px] text-white font-mono font-bold">
+                        {reward.points.toLocaleString()} pts
+                      </span>
                     </div>
                   </div>
                   <button
                     onClick={() => handleRedeem(reward.points)}
                     disabled={!available}
                     className={cn(
-                      "text-[10px] uppercase tracking-widest px-3 py-1.5 border transition-colors",
+                      "text-[10px] font-bold uppercase tracking-widest px-4 py-2 border transition-all",
                       available
-                        ? "border-[#c9a962] text-[#c9a962] hover:bg-[#c9a962] hover:text-[#0a0a0a]"
+                        ? "border-[#c9a962] text-[#c9a962] hover:bg-[#c9a962] hover:text-[#0a0a0a] shadow-[0_0_10px_rgba(201,169,98,0.2)]"
                         : "border-[#222222] text-[#333333] cursor-not-allowed",
                     )}
                   >
-                    Redeem
+                    {t('loyalty.redeem')}
                   </button>
                 </div>
               );
@@ -234,27 +273,29 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
           </div>
 
           {/* Custom redemption */}
-          <div className="border border-[#222222] p-3 space-y-2">
-            <div className="text-[10px] text-[#777777] uppercase tracking-widest">Custom Redemption</div>
+          <div className="border border-[#222222] p-4 space-y-3 bg-[#0a0a0a]">
+            <div className="text-[10px] text-[#777777] uppercase tracking-widest">{t('loyalty.custom_redemption')}</div>
             <div className="flex gap-2">
-              <input
-                type="number"
-                min={config.minRedemptionPoints}
-                value={redeemPoints}
-                onChange={(e) => setRedeemPoints(e.target.value)}
-                placeholder={`Min ${config.minRedemptionPoints} pts`}
-                aria-label="Points to redeem"
-                className="flex-1 bg-[#0a0a0a] border border-[#333333] px-3 py-2 text-xs text-white focus:outline-none focus:border-[#c9a962]"
-              />
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  min={config.minRedemptionPoints}
+                  value={redeemPoints}
+                  onChange={(e) => setRedeemPoints(e.target.value)}
+                  placeholder={`${t('loyalty.min_points')}: ${config.minRedemptionPoints}`}
+                  aria-label="Points to redeem"
+                  className="w-full bg-[#111111] border border-[#333333] px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#c9a962] transition-colors"
+                />
+              </div>
               <button
                 onClick={handleCustomRedeem}
-                className="px-4 py-2 border border-[#c9a962] text-[#c9a962] text-[10px] uppercase tracking-widest hover:bg-[#c9a962] hover:text-[#0a0a0a] transition-colors"
+                className="px-6 py-2 border border-[#c9a962] text-[#c9a962] text-[10px] font-bold uppercase tracking-widest hover:bg-[#c9a962] hover:text-[#0a0a0a] transition-all"
               >
-                Redeem
+                {t('loyalty.redeem')}
               </button>
             </div>
             {redeemPoints && !isNaN(parseInt(redeemPoints)) && (
-              <div className="text-[10px] text-[#555555]">
+              <div className="text-[10px] text-[#555555] font-mono animate-pulse">
                 ≈ ${pointsToUSDC(parseInt(redeemPoints), config).toFixed(2)} USDC
               </div>
             )}
@@ -264,7 +305,7 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
 
       {/* Tier Comparison Tab */}
       {activeTab === "tiers" && (
-        <div className="space-y-2">
+        <div className="space-y-2 animate-in fade-in duration-500">
           {TIERS.map((t) => {
             const isActive = t.tier === profile.tier;
             const isUnlocked = TIERS.findIndex((x) => x.tier === profile.tier) >= TIERS.findIndex((x) => x.tier === t.tier);
@@ -272,31 +313,33 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
               <div
                 key={t.tier}
                 className={cn(
-                  "border p-3 space-y-2",
-                  isActive ? "" : isUnlocked ? "border-[#222222]" : "border-[#1a1a1a] opacity-40",
+                  "border p-4 space-y-3 transition-all",
+                  isActive ? "bg-[#1a1a1a] ring-1 ring-inset" : isUnlocked ? "border-[#222222] opacity-80" : "border-[#1a1a1a] opacity-40 grayscale",
                 )}
-                style={isActive ? { borderColor: t.color + "88" } : {}}
+                style={isActive ? { borderColor: t.color, ringColor: t.color + "44" } : {}}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold" style={{ color: t.color }}>{t.label}</span>
-                  <span className="text-[10px] text-[#555555]">{t.minVolume.toLocaleString()}+ USDC</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black uppercase italic tracking-tighter" style={{ color: t.color }}>{t.label}</span>
+                    <span className="text-[9px] text-[#555555] font-mono">{t.minVolume.toLocaleString()}+ USDC</span>
+                  </div>
                   {isActive && (
-                    <span className="text-[10px] px-2 py-0.5 border" style={{ color: t.color, borderColor: t.color + "55" }}>
+                    <span className="text-[9px] font-bold px-2 py-0.5 border uppercase tracking-widest" style={{ color: t.color, borderColor: t.color + "55" }}>
                       Current
                     </span>
                   )}
                 </div>
-                <ul className="space-y-0.5">
+                <div className="grid grid-cols-1 gap-1">
                   {t.benefits.map((b) => (
-                    <li key={b} className="text-[10px] text-[#777777] flex items-center gap-1.5">
-                      <span style={{ color: t.color }}>✓</span>{b}
-                    </li>
+                    <div key={b} className="text-[10px] text-[#888888] flex items-center gap-2">
+                      <span className="text-xs" style={{ color: t.color }}>•</span>{b}
+                    </div>
                   ))}
-                </ul>
-                <div className="flex gap-4 text-[10px] text-[#555555]">
-                  <span>{t.pointsMultiplier}× points</span>
-                  <span>{(t.feeDiscount * 100).toFixed(2)}% fee off</span>
-                  <span>{t.withdrawalLimit.toLocaleString()} USDC/day</span>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-[#555555] pt-2 border-t border-[#222222] font-mono">
+                  <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-[#c9a962]" /> {t.pointsMultiplier}× points</span>
+                  <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-green-500" /> {(t.feeDiscount * 100).toFixed(2)}% off</span>
+                  <span className="flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-blue-500" /> {t.withdrawalLimit.toLocaleString()} limit</span>
                 </div>
               </div>
             );
@@ -306,19 +349,21 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
 
       {/* Redemption History Tab */}
       {activeTab === "history" && (
-        <div className="space-y-2">
+        <div className="space-y-2 animate-in fade-in duration-500">
           {redemptionHistory.length === 0 ? (
-            <div className="text-xs text-[#555555] text-center py-4">No redemption history yet</div>
+            <div className="text-xs text-[#555555] text-center py-8 border border-dashed border-[#222222]">No redemption history yet</div>
           ) : (
             redemptionHistory.map((r) => (
-              <div key={r.id} className="flex items-center justify-between border border-[#222222] p-3">
-                <div>
-                  <div className="text-xs text-white">{r.pointsRedeemed.toLocaleString()} pts redeemed</div>
-                  <div className="text-[10px] text-[#555555] mt-0.5">
-                    {new Date(r.redeemedAt).toLocaleDateString()}
+              <div key={r.id} className="flex items-center justify-between border border-[#222222] p-3 bg-[#0a0a0a] hover:bg-[#111111] transition-colors">
+                <div className="space-y-1">
+                  <div className="text-xs text-white font-bold">{r.pointsRedeemed.toLocaleString()} <span className="text-[#555555] font-normal uppercase text-[9px]">pts redeemed</span></div>
+                  <div className="text-[10px] text-[#555555] font-mono">
+                    {new Date(r.redeemedAt).toLocaleDateString()} · {new Date(r.redeemedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <div className="text-xs text-green-400 font-semibold">+${r.usdcValue.toFixed(2)} USDC</div>
+                <div className="text-xs text-green-400 font-mono font-bold">
+                  +${r.usdcValue.toFixed(2)} <span className="text-[9px] opacity-60">USDC</span>
+                </div>
               </div>
             ))
           )}
@@ -327,3 +372,4 @@ export default function LoyaltyDashboard({ userAddress, onTierUpgrade }: Props) 
     </div>
   );
 }
+
