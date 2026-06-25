@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/lib/i18n';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,6 +104,8 @@ interface TermsModalProps {
 }
 
 function TermsModal({ onClose }: TermsModalProps) {
+  const { t } = useI18n();
+
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -133,7 +136,7 @@ function TermsModal({ onClose }: TermsModalProps) {
             id="insurance-terms-title"
             className="text-sm font-semibold text-white tracking-wider uppercase"
           >
-            Insurance Terms &amp; Conditions
+            {t('insurance.terms_title')}
           </h2>
           <button
             onClick={onClose}
@@ -146,7 +149,7 @@ function TermsModal({ onClose }: TermsModalProps) {
 
         <div className="flex flex-col gap-4 text-xs text-[#aaaaaa] leading-relaxed">
           <section>
-            <h3 className="text-[10px] tracking-widest uppercase text-[#c9a962] mb-2">Coverage</h3>
+            <h3 className="text-[10px] tracking-widest uppercase text-[#c9a962] mb-2">{t('insurance.coverage')}</h3>
             <p>
               Transaction insurance covers up to 110% of the insured transaction amount in the event
               of a verified loss. Coverage applies to failed, reversed, or fraudulent transactions
@@ -155,7 +158,7 @@ function TermsModal({ onClose }: TermsModalProps) {
           </section>
 
           <section>
-            <h3 className="text-[10px] tracking-widest uppercase text-[#c9a962] mb-2">Premium</h3>
+            <h3 className="text-[10px] tracking-widest uppercase text-[#c9a962] mb-2">{t('insurance.premium')}</h3>
             <p>
               The premium is calculated based on transaction amount, currency risk profile, and
               provider tier. Premiums are non-refundable once a transaction is submitted. High-value
@@ -208,7 +211,7 @@ function TermsModal({ onClose }: TermsModalProps) {
             'focus:outline-none focus-visible:ring-1 focus-visible:ring-[#c9a962]',
           )}
         >
-          CLOSE
+          {t('common.close').toUpperCase()}
         </button>
       </div>
     </div>
@@ -229,6 +232,8 @@ export function InsuranceOption({
   const [quote, setQuote] = useState<InsuranceQuote | null>(null);
   const [showTerms, setShowTerms] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+
+  const { t } = useI18n();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -302,7 +307,7 @@ export function InsuranceOption({
       <div
         className={cn(
           'border transition-colors duration-150',
-          enabled ? 'border-[#c9a962] bg-[#c9a962]/5' : 'border-[#333333] bg-[#0a0a0a]',
+          enabled ? 'border-[#c9a962] bg-[#c9a962]/5 shadow-[inset_0_0_20px_rgba(201,169,98,0.05)]' : 'border-[#333333] bg-[#0a0a0a]',
           isDisabled && 'opacity-50 cursor-not-allowed',
         )}
         role="group"
@@ -344,10 +349,10 @@ export function InsuranceOption({
                   enabled ? 'text-[#c9a962]' : 'text-white',
                 )}
               >
-                Transaction Insurance
+                {t('insurance.title')}
               </p>
               <p className="text-xs text-[#777777] mt-0.5">
-                Protect this transaction against loss or failure
+                {t('insurance.description')}
               </p>
             </div>
           </div>
@@ -362,19 +367,19 @@ export function InsuranceOption({
             )}
             aria-label="View insurance terms and conditions"
           >
-            Terms
+            {t('insurance.terms')}
           </button>
         </div>
 
         {/* ── Premium breakdown (always visible when amount > 0) ── */}
         {quote && amount > 0 && (
-          <div className="border-t border-[#222222] px-4 py-3 flex flex-col gap-2">
+          <div className="border-t border-[#222222] px-4 py-3 flex flex-col gap-2 bg-[#0d0d0d]">
             {/* Provider tier badge */}
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] tracking-widest uppercase text-[#777777]">Provider</span>
+              <span className="text-[10px] tracking-widest uppercase text-[#777777]">{t('insurance.provider')}</span>
               <span
                 className={cn(
-                  'text-[10px] tracking-widest uppercase px-2 py-0.5 border',
+                  'text-[10px] tracking-widest uppercase px-2 py-0.5 border font-bold',
                   quote.provider === 'enterprise'
                     ? 'border-[#c9a962] text-[#c9a962]'
                     : quote.provider === 'premium'
@@ -390,9 +395,9 @@ export function InsuranceOption({
             {riskInfo && (
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] tracking-widest uppercase text-[#777777]">
-                  Risk Score
+                  {t('insurance.risk_score')}
                 </span>
-                <span className={cn('text-xs tabular-nums', riskInfo.color)}>
+                <span className={cn('text-xs tabular-nums font-semibold', riskInfo.color)}>
                   {quote.riskScore}/100 — {riskInfo.label}
                 </span>
               </div>
@@ -400,33 +405,35 @@ export function InsuranceOption({
 
             {/* Premium */}
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] tracking-widest uppercase text-[#777777]">Premium</span>
-              <span className="text-xs text-white tabular-nums">
-                {formatAmount(quote.premium)} USDC
-                <span className="text-[#777777] ml-1">
-                  ({amount >= 10000 ? '0.3%' : '0.5%'} rate)
-                </span>
-              </span>
+              <span className="text-[10px] tracking-widest uppercase text-[#777777]">{t('insurance.premium')}</span>
+              <div className="text-right">
+                <div className="text-xs text-white tabular-nums font-bold">
+                  {formatAmount(quote.premium)} USDC
+                </div>
+                <div className="text-[9px] text-[#555555] tracking-widest uppercase mt-0.5">
+                  ({amount >= 10000 ? '0.3%' : '0.5%'} fixed rate)
+                </div>
+              </div>
             </div>
 
             {/* Coverage */}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] tracking-widest uppercase text-[#777777]">Coverage</span>
-              <span className="text-xs text-[#4ade80] tabular-nums">
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[10px] tracking-widest uppercase text-[#777777]">{t('insurance.coverage')}</span>
+              <span className="text-xs text-[#4ade80] tabular-nums font-black">
                 Up to {formatAmount(quote.coverage)} USDC
               </span>
             </div>
 
             {/* Quote expiry countdown (only when enabled) */}
             {enabled && timeLeft !== null && (
-              <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-[#222222]">
+              <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-[#222222]">
                 <span className="text-[10px] tracking-widest uppercase text-[#777777]">
-                  Quote expires
+                  {t('insurance.expires')}
                 </span>
                 <span
                   className={cn(
-                    'text-[10px] tabular-nums font-mono',
-                    timeLeft < 60000 ? 'text-[#f87171]' : 'text-[#777777]',
+                    'text-[10px] tabular-nums font-mono font-bold',
+                    timeLeft < 60000 ? 'text-[#f87171] animate-pulse' : 'text-[#777777]',
                   )}
                   aria-live="polite"
                   aria-label={`Quote expires in ${formatCountdown(timeLeft)}`}
@@ -441,7 +448,7 @@ export function InsuranceOption({
         {/* ── Disabled hint ── */}
         {amount <= 0 && (
           <div className="border-t border-[#222222] px-4 py-2">
-            <p className="text-[10px] text-[#555555] tracking-wide">
+            <p className="text-[10px] text-[#555555] tracking-wide italic">
               Enter a transaction amount to see insurance options
             </p>
           </div>
@@ -452,3 +459,4 @@ export function InsuranceOption({
     </>
   );
 }
+
